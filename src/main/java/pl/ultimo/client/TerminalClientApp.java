@@ -14,11 +14,14 @@ import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Scanner;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
 
 /**
  * Interactive command-line interface client for playing Ultimo over TCP.
@@ -155,21 +158,58 @@ public class TerminalClientApp {
                 continue;
             }
 
-            // Quick play by card number [1 to N]
-            if (input.matches("\\d+")) {
-                int index = Integer.parseInt(input) - 1;
+            // Single or multi-card combo play by card numbers [e.g. "1", "1,2", "1 2", "play 1,2"]
+            String playTarget = input;
+            if (playTarget.toLowerCase().startsWith("play ")) {
+                playTarget = playTarget.substring(5).trim();
+            }
+
+            if (playTarget.matches("^[0-9]+([\\s,]+[0-9]+)*$")) {
+                String[] tokens = playTarget.split("[\\s,]+");
+                List<Integer> selectedIndices = new ArrayList<>();
+                Set<Integer> uniqueCheck = new HashSet<>();
+                boolean validIndices = true;
+
                 synchronized (myHand) {
-                    if (index < 0 || index >= myHand.size()) {
-                        System.out.println("Niepoprawny numer karty! Dostępne numery: 1 do " + myHand.size());
+                    for (String token : tokens) {
+                        try {
+                            int index = Integer.parseInt(token) - 1;
+                            if (index < 0 || index >= myHand.size()) {
+                                System.out.println("Niepoprawny numer karty: " + token + "! Dostępne numery: 1 do " + myHand.size());
+                                validIndices = false;
+                                break;
+                            }
+                            if (!uniqueCheck.add(index)) {
+                                System.out.println("Karta #" + token + " została podana więcej niż raz! Każda karta z ręki ma swój unikalny numer.");
+                                validIndices = false;
+                                break;
+                            }
+                            selectedIndices.add(index);
+                        } catch (NumberFormatException e) {
+                            validIndices = false;
+                            break;
+                        }
+                    }
+
+                    if (!validIndices || selectedIndices.isEmpty()) {
                         continue;
                     }
 
-                    Card cardToPlay = myHand.get(index);
-                    if (cardToPlay.isWild()) {
+                    List<Card> cardsToPlay = new ArrayList<>();
+                    for (int idx : selectedIndices) {
+                        cardsToPlay.add(myHand.get(idx));
+                    }
+
+                    boolean hasWild = cardsToPlay.stream().anyMatch(Card::isWild);
+                    String cardsStr = cardsToPlay.stream()
+                            .map(ProtocolCodec::formatCard)
+                            .collect(Collectors.joining(","));
+
+                    if (hasWild) {
                         CardColor chosenColor = promptWildColor(scanner);
-                        sendCommand("PLAY " + ProtocolCodec.formatCard(cardToPlay) + " " + chosenColor.name());
+                        sendCommand("PLAY " + cardsStr + " " + chosenColor.name());
                     } else {
-                        sendCommand("PLAY " + ProtocolCodec.formatCard(cardToPlay));
+                        sendCommand("PLAY " + cardsStr);
                     }
                 }
                 continue;
@@ -288,7 +328,7 @@ public class TerminalClientApp {
         synchronized (myHand) {
             System.out.println(renderer.renderHand(myHand));
         }
-        System.out.print("Wybór [1-" + myHand.size() + " / d / pass / help]> ");
+        System.out.print("Wybór [1-" + myHand.size() + " / kombo np. 1,2 / d / pass / help]> ");
     }
 
     private void sendCommand(String commandLine) {
@@ -302,14 +342,14 @@ public class TerminalClientApp {
 
     private void printHelp() {
         System.out.println("\n--- DOSTĘPNE POLECENIA ---");
-        System.out.println("  [1, 2, 3...] - Zagranie karty o danym numerze z Twojej ręki");
-        System.out.println("  s, start     - Rozpoczęcie meczu (gdy w pokoju jest min. 2 graczy)");
-        System.out.println("  d, draw      - Dobranie 1 karty z talii");
-        System.out.println("  p, pass      - Spasowanie tury (dozwolone po dobraniu karty)");
-        System.out.println("  c <treść>    - Wysłanie wiadomości na czacie pokojowym");
-        System.out.println("  t, table     - Ponowne wyświetlenie stołu i kart");
-        System.out.println("  h, help      - Wyświetlenie tej pomocy");
-        System.out.println("  q, quit      - Wyjście z gry");
+        System.out.println("  [1, 2... / 1,2 / 1 2] - Zagranie karty lub komba kart o tej samej wartości (np. 1,3)");
+        System.out.println("  s, start              - Rozpoczęcie meczu (gdy w pokoju jest min. 2 graczy)");
+        System.out.println("  d, draw               - Dobranie 1 karty z talii");
+        System.out.println("  p, pass               - Spasowanie tury (dozwolone po dobraniu karty)");
+        System.out.println("  c <treść>             - Wysłanie wiadomości na czacie pokojowym");
+        System.out.println("  t, table              - Ponowne wyświetlenie stołu i kart");
+        System.out.println("  h, help               - Wyświetlenie tej pomocy");
+        System.out.println("  q, quit               - Wyjście z gry");
         System.out.println("--------------------------\n");
     }
 

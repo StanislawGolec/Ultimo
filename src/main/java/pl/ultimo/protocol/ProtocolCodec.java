@@ -53,15 +53,44 @@ public final class ProtocolCodec {
                     if (parts.length < 2) {
                         throw new ProtocolException("PLAY command requires card: PLAY <card> [chosenColor]");
                     }
-                    Card card = parseCard(parts[1]);
                     CardColor chosenWildColor = null;
-                    if (card.isWild()) {
-                        if (parts.length < 3) {
-                            throw new ProtocolException("Wild cards require a chosen color: PLAY " + parts[1] + " <RED|YELLOW|GREEN|BLUE>");
+                    int cardEndIndex = parts.length;
+                    if (parts.length > 2) {
+                        try {
+                            CardColor candidate = parseColor(parts[parts.length - 1]);
+                            if (candidate.isStandardColor()) {
+                                chosenWildColor = candidate;
+                                cardEndIndex = parts.length - 1;
+                            }
+                        } catch (Exception ignored) {
+                            // Last token is not a color (part of card combo tokens)
                         }
-                        chosenWildColor = parseColor(parts[2]);
                     }
-                    yield new ClientCommand.Play(card, chosenWildColor);
+
+                    List<Card> cards = new ArrayList<>();
+                    for (int i = 1; i < cardEndIndex; i++) {
+                        String token = parts[i];
+                        if (token.contains(",")) {
+                            for (String subToken : token.split(",")) {
+                                if (!subToken.isBlank()) {
+                                    cards.add(parseCard(subToken.trim()));
+                                }
+                            }
+                        } else {
+                            cards.add(parseCard(token));
+                        }
+                    }
+
+                    if (cards.isEmpty()) {
+                        throw new ProtocolException("PLAY command requires card: PLAY <card> [chosenColor]");
+                    }
+
+                    boolean hasWild = cards.stream().anyMatch(Card::isWild);
+                    if (hasWild && chosenWildColor == null) {
+                        throw new ProtocolException("Wild cards require a chosen color: PLAY " + parts[1] + " <RED|YELLOW|GREEN|BLUE>");
+                    }
+
+                    yield new ClientCommand.Play(cards, chosenWildColor);
                 }
                 case "DRAW" -> new ClientCommand.Draw();
                 case "PASS" -> new ClientCommand.Pass();
@@ -88,11 +117,14 @@ public final class ProtocolCodec {
         return switch (command) {
             case ClientCommand.Join join -> "JOIN " + join.username() + "\n";
             case ClientCommand.Play play -> {
-                String cardStr = formatCard(play.card());
-                if (play.card().isWild() && play.chosenWildColor() != null) {
-                    yield "PLAY " + cardStr + " " + play.chosenWildColor() + "\n";
+                String cardsStr = play.cards().stream()
+                        .map(ProtocolCodec::formatCard)
+                        .collect(Collectors.joining(","));
+                boolean hasWild = play.cards().stream().anyMatch(Card::isWild);
+                if (hasWild && play.chosenWildColor() != null) {
+                    yield "PLAY " + cardsStr + " " + play.chosenWildColor() + "\n";
                 }
-                yield "PLAY " + cardStr + "\n";
+                yield "PLAY " + cardsStr + "\n";
             }
             case ClientCommand.Draw draw -> "DRAW\n";
             case ClientCommand.Pass pass -> "PASS\n";

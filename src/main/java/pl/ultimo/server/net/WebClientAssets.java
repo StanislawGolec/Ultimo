@@ -69,6 +69,9 @@ public final class WebClientAssets {
     .card { width: 90px; height: 130px; border-radius: 10px; border: 3px solid white; display: flex; flex-direction: column; justify-content: space-between; padding: 6px; box-shadow: 0 6px 12px rgba(0,0,0,0.35); cursor: pointer; transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s; user-select: none; flex-shrink: 0; position: relative; }
     .card:hover { transform: translateY(-12px); box-shadow: 0 14px 20px rgba(0,0,0,0.5); z-index: 10; }
     .card.playable { border-color: #fef08a; box-shadow: 0 0 14px rgba(254, 240, 138, 0.8), 0 0 4px white; }
+    .card.selected { transform: translateY(-24px) scale(1.05); border-color: #38bdf8; box-shadow: 0 0 22px rgba(56, 189, 248, 0.95), 0 15px 25px rgba(0,0,0,0.6); z-index: 25; }
+    .btn-play { background: #22c55e; color: white; padding: 6px 14px; border-radius: 6px; font-weight: 700; cursor: pointer; border: 1px solid #16a34a; transition: all 0.15s; }
+    .btn-play:hover { transform: scale(1.05); background: #16a34a; }
     .card-top { font-size: 0.85rem; font-weight: 900; }
     .card-center { font-size: 1.5rem; font-weight: 900; align-self: center; margin: auto; background: white; border-radius: 50%; width: 52px; height: 52px; display: flex; align-items: center; justify-content: center; color: black; box-shadow: inset 0 0 4px rgba(0,0,0,0.4); text-align: center; line-height: 1; }
     .card-bottom { font-size: 0.85rem; font-weight: 900; align-self: flex-end; transform: rotate(180deg); }
@@ -135,6 +138,7 @@ public final class WebClientAssets {
         <div class="hand-header">
           <div style="font-weight: 700;">Your Hand (<span id="handCount">0</span>)</div>
           <div style="display: flex; gap: 8px;">
+            <button class="btn-play" id="playBtn" style="display: none;">Play Card</button>
             <button class="btn-draw" id="drawBtn" disabled>Draw Card</button>
             <button class="btn-pass" id="passBtn" disabled>Pass Turn</button>
           </div>
@@ -175,6 +179,8 @@ public final class WebClientAssets {
     let ws = null;
     let myUsername = '';
     let pendingWildCard = null;
+    let pendingWildCards = null;
+    let selectedIndices = new Set();
     let currentTurnPlayer = '';
     let currentTopCard = null;
     let currentActiveColor = 'RED';
@@ -195,6 +201,7 @@ public final class WebClientAssets {
     const opponentsBar = document.getElementById('opponentsBar');
     const turnBanner = document.getElementById('turnBanner');
     const discardCardContainer = document.getElementById('discardCardContainer');
+    const playBtn = document.getElementById('playBtn');
     const drawBtn = document.getElementById('drawBtn');
     const passBtn = document.getElementById('passBtn');
     const deckPile = document.getElementById('deckPile');
@@ -261,16 +268,34 @@ public final class WebClientAssets {
       startBtn.disabled = true;
     });
 
+    playBtn.addEventListener('click', () => {
+      if (!playBtn.disabled) playSelectedCards();
+    });
+
     drawBtn.addEventListener('click', () => {
-      if (!drawBtn.disabled) sendCommand('DRAW');
+      if (!drawBtn.disabled) {
+        selectedIndices.clear();
+        updatePlayBtnUI();
+        sendCommand('DRAW');
+      }
     });
 
     deckPile.addEventListener('click', () => {
-      if (!drawBtn.disabled) sendCommand('DRAW');
+      if (!drawBtn.disabled) {
+        selectedIndices.clear();
+        updatePlayBtnUI();
+        sendCommand('DRAW');
+      }
     });
 
     passBtn.addEventListener('click', () => {
-      if (!passBtn.disabled) sendCommand('PASS');
+      if (!passBtn.disabled) {
+        hasDrawnThisTurn = false;
+        passBtn.disabled = true;
+        selectedIndices.clear();
+        updatePlayBtnUI();
+        sendCommand('PASS');
+      }
     });
 
     sendChatBtn.addEventListener('click', () => {
@@ -337,6 +362,7 @@ public final class WebClientAssets {
 
         case 'HAND_UPDATE': {
           const cardTokens = parts.slice(1).filter(t => t.trim().length > 0);
+          selectedIndices.clear();
           renderHand(cardTokens);
           break;
         }
@@ -344,7 +370,11 @@ public final class WebClientAssets {
         case 'TOP_CARD': {
           gameStarted = true;
           startBtn.style.display = 'none';
-          currentTopCard = parts[1];
+          const newTopCard = parts[1];
+          if (newTopCard !== currentTopCard) {
+            currentTopCard = newTopCard;
+            hasDrawnThisTurn = false;
+          }
           currentActiveColor = parts[2] || 'RED';
           discardCardContainer.innerHTML = '';
           discardCardContainer.appendChild(createCardElement(currentTopCard, currentActiveColor));
@@ -355,8 +385,12 @@ public final class WebClientAssets {
         case 'TURN_ANNOUNCED': {
           gameStarted = true;
           startBtn.style.display = 'none';
-          currentTurnPlayer = parts[1];
-          hasDrawnThisTurn = false;
+          const newTurnPlayer = parts[1];
+          if (newTurnPlayer !== currentTurnPlayer) {
+            currentTurnPlayer = newTurnPlayer;
+            hasDrawnThisTurn = false;
+            selectedIndices.clear();
+          }
           updateTurnUI();
           renderOpponents();
           break;
@@ -375,10 +409,7 @@ public final class WebClientAssets {
           if (parts[1]) {
             logMessage(`You drew a card: ${parts[1]}`, 'info');
           }
-          if (currentTurnPlayer === myUsername) {
-            drawBtn.disabled = true;
-            passBtn.disabled = false;
-          }
+          updateTurnUI();
           break;
         }
 
@@ -459,43 +490,151 @@ public final class WebClientAssets {
       });
     }
 
+    function getCardValue(token) {
+      if (!token) return '';
+      if (token.startsWith('WILD')) {
+        return token.includes('DRAW') ? 'WILD_DRAW_FOUR' : 'WILD';
+      }
+      const sep = token.indexOf('_');
+      return sep > 0 ? token.substring(sep + 1) : token;
+    }
+
+    function isComboPlayable(tokens) {
+      if (!gameStarted || currentTurnPlayer !== myUsername || !tokens || tokens.length === 0) return false;
+      const firstVal = getCardValue(tokens[0]);
+      const allSameVal = tokens.every(t => getCardValue(t) === firstVal);
+      if (!allSameVal) return false;
+      return tokens.some(t => isPlayableCard(t));
+    }
+
+    function updatePlayBtnUI() {
+      if (!playBtn) return;
+      if (selectedIndices.size === 0 || currentTurnPlayer !== myUsername) {
+        playBtn.style.display = 'none';
+        return;
+      }
+
+      playBtn.style.display = 'inline-block';
+      const selectedTokens = Array.from(selectedIndices).map(i => currentHandTokens[i]);
+      const playable = selectedTokens.length === 1
+          ? isPlayableCard(selectedTokens[0])
+          : isComboPlayable(selectedTokens);
+
+      if (selectedTokens.length === 1) {
+        playBtn.textContent = 'Play Card';
+      } else {
+        playBtn.textContent = `Play Combo (${selectedTokens.length} cards)`;
+      }
+
+      playBtn.disabled = !playable;
+      if (playable) {
+        playBtn.style.background = '#22c55e';
+        playBtn.style.opacity = '1';
+        playBtn.style.cursor = 'pointer';
+      } else {
+        playBtn.style.background = '#64748b';
+        playBtn.style.opacity = '0.6';
+        playBtn.style.cursor = 'not-allowed';
+      }
+    }
+
     function renderHand(cardTokens) {
       currentHandTokens = cardTokens;
       handCards.innerHTML = '';
       handCount.textContent = cardTokens.length;
 
-      cardTokens.forEach(cardToken => {
+      cardTokens.forEach((cardToken, index) => {
         const el = createCardElement(cardToken);
         if (isPlayableCard(cardToken)) {
           el.classList.add('playable');
         }
-        el.onclick = () => onCardClicked(cardToken);
+        if (selectedIndices.has(index)) {
+          el.classList.add('selected');
+        }
+        el.onclick = () => onCardClicked(index, cardToken);
+        el.ondblclick = () => onCardDoubleClicked(index, cardToken);
         handCards.appendChild(el);
       });
+      updatePlayBtnUI();
     }
 
-    function onCardClicked(cardToken) {
+    function onCardClicked(index, cardToken) {
       if (!gameStarted) return;
       if (currentTurnPlayer !== myUsername) {
         logMessage('Not your turn! Wait for ' + currentTurnPlayer, 'error');
         return;
       }
 
-      if (!isPlayableCard(cardToken)) {
-        logMessage(`Cannot play ${cardToken}: must match active color '${currentActiveColor}', matching face, or Wild`, 'error');
+      if (selectedIndices.has(index)) {
+        selectedIndices.delete(index);
+      } else {
+        if (selectedIndices.size > 0) {
+          const firstIdx = selectedIndices.values().next().value;
+          const firstVal = getCardValue(currentHandTokens[firstIdx]);
+          const thisVal = getCardValue(cardToken);
+          if (firstVal !== thisVal) {
+            selectedIndices.clear();
+          }
+        }
+        selectedIndices.add(index);
+      }
+
+      const children = handCards.children;
+      for (let i = 0; i < children.length; i++) {
+        if (selectedIndices.has(i)) {
+          children[i].classList.add('selected');
+        } else {
+          children[i].classList.remove('selected');
+        }
+      }
+
+      updatePlayBtnUI();
+    }
+
+    function onCardDoubleClicked(index, cardToken) {
+      if (!gameStarted || currentTurnPlayer !== myUsername) return;
+      if (!selectedIndices.has(index)) {
+        selectedIndices.clear();
+        selectedIndices.add(index);
+      }
+      playSelectedCards();
+    }
+
+    function playSelectedCards() {
+      if (!gameStarted || currentTurnPlayer !== myUsername) return;
+      const selectedTokens = Array.from(selectedIndices).map(i => currentHandTokens[i]);
+      if (selectedTokens.length === 0) return;
+
+      const playable = selectedTokens.length === 1
+          ? isPlayableCard(selectedTokens[0])
+          : isComboPlayable(selectedTokens);
+
+      if (!playable) {
+        logMessage('Selected card(s) cannot be legally played on current discard pile', 'error');
         return;
       }
 
-      if (cardToken.startsWith('WILD')) {
-        pendingWildCard = cardToken;
+      const hasWild = selectedTokens.some(t => t.startsWith('WILD'));
+      if (hasWild) {
+        pendingWildCards = selectedTokens;
         colorModal.style.display = 'flex';
-      } else {
-        sendCommand(`PLAY ${cardToken}`);
+        return;
       }
+
+      const cmd = `PLAY ${selectedTokens.join(',')}`;
+      hasDrawnThisTurn = false;
+      selectedIndices.clear();
+      updatePlayBtnUI();
+      sendCommand(cmd);
     }
 
     function selectWildColor(color) {
-      if (pendingWildCard) {
+      if (pendingWildCards && pendingWildCards.length > 0) {
+        hasDrawnThisTurn = false;
+        sendCommand(`PLAY ${pendingWildCards.join(',')} ${color}`);
+        pendingWildCards = null;
+      } else if (pendingWildCard) {
+        hasDrawnThisTurn = false;
         sendCommand(`PLAY ${pendingWildCard} ${color}`);
         pendingWildCard = null;
       }
@@ -505,6 +644,7 @@ public final class WebClientAssets {
     function closeColorModal() {
       colorModal.style.display = 'none';
       pendingWildCard = null;
+      pendingWildCards = null;
     }
 
     function createCardElement(token, overrideColor = null) {

@@ -4,8 +4,14 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import pl.ultimo.core.engine.UltimoEngine;
+import pl.ultimo.core.model.Card;
+import pl.ultimo.core.model.CardColor;
+import pl.ultimo.core.model.CardValue;
+import pl.ultimo.core.model.Player;
 import pl.ultimo.server.ServerApp;
 import pl.ultimo.server.config.ServerConfig;
+import pl.ultimo.server.room.GameRoom;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -165,6 +171,98 @@ class WebSocketIntegrationTest {
         assertTrue(bobMsgs.stream().anyMatch(m -> m.startsWith("TOP_CARD")));
         assertTrue(bobMsgs.stream().anyMatch(m -> m.startsWith("TURN_ANNOUNCED")));
 
+        wsAlice.sendClose(WebSocket.NORMAL_CLOSURE, "Bye");
+        wsBob.sendClose(WebSocket.NORMAL_CLOSURE, "Bye");
+    }
+
+    @Test
+    @DisplayName("Should play multi-card combo over WebSocket and broadcast effects")
+    void shouldPlayMultiCardComboOverWebSocket() throws Exception {
+        HttpClient client = HttpClient.newHttpClient();
+        List<String> aliceMsgs = Collections.synchronizedList(new ArrayList<>());
+        List<String> bobMsgs = Collections.synchronizedList(new ArrayList<>());
+
+        CountDownLatch startLatch = new CountDownLatch(2);
+        CountDownLatch comboChatLatch = new CountDownLatch(2);
+
+        WebSocket wsAlice = client.newWebSocketBuilder()
+                .buildAsync(URI.create("ws://localhost:" + port + "/ws"), new WebSocket.Listener() {
+                    @Override
+                    public CompletionStage<?> onText(WebSocket ws, CharSequence data, boolean last) {
+                        String msg = data.toString();
+                        aliceMsgs.add(msg);
+                        if (msg.startsWith("HAND_UPDATE")) {
+                            startLatch.countDown();
+                        }
+                        if (msg.startsWith("CHAT") && msg.contains("played a combo of 2 cards!")) {
+                            comboChatLatch.countDown();
+                        }
+                        return WebSocket.Listener.super.onText(ws, data, last);
+                    }
+                })
+                .get(5, TimeUnit.SECONDS);
+
+        WebSocket wsBob = client.newWebSocketBuilder()
+                .buildAsync(URI.create("ws://localhost:" + port + "/ws"), new WebSocket.Listener() {
+                    @Override
+                    public CompletionStage<?> onText(WebSocket ws, CharSequence data, boolean last) {
+                        String msg = data.toString();
+                        bobMsgs.add(msg);
+                        if (msg.startsWith("HAND_UPDATE")) {
+                            startLatch.countDown();
+                        }
+                        if (msg.startsWith("CHAT") && msg.contains("played a combo of 2 cards!")) {
+                            comboChatLatch.countDown();
+                        }
+                        return WebSocket.Listener.super.onText(ws, data, last);
+                    }
+                })
+                .get(5, TimeUnit.SECONDS);
+
+        wsAlice.sendText("JOIN Alice\n", true);
+        wsBob.sendText("JOIN Bob\n", true);
+
+        Thread.sleep(150);
+
+        wsAlice.sendText("START\n", true);
+
+        boolean started = startLatch.await(5, TimeUnit.SECONDS);
+        assertTrue(started, "Expected game to start");
+
+        // Locate active game room
+        GameRoom room = server.getRoomManager().getActiveRooms().values().iterator().next();
+        UltimoEngine engine = room.getEngine();
+        assertNotNull(engine);
+
+        // Find current active player (Alice or Bob)
+        Player current = engine.getTurnManager().getCurrentPlayer();
+        WebSocket currentWs = current.getUsername().equals("Alice") ? wsAlice : wsBob;
+        String nextPlayerName = engine.getTurnManager().peekNextPlayer().getUsername();
+
+        // Setup discard top card to RED_NINE
+        engine.getDiscardPile().playCard(new Card(CardColor.RED, CardValue.NINE), CardColor.RED);
+
+        // Give current player a matching combo: RED_NINE and BLUE_NINE
+        current.getHand().clear();
+        current.getHand().addCard(new Card(CardColor.RED, CardValue.NINE));
+        current.getHand().addCard(new Card(CardColor.BLUE, CardValue.NINE));
+        current.getHand().addCard(new Card(CardColor.GREEN, CardValue.ONE)); // Extra card so game does not end immediately
+
+        // Send multi-card PLAY command over WebSocket
+        currentWs.sendText("PLAY RED_NINE,BLUE_NINE\n", true);
+
+        boolean gotComboBroadcast = comboChatLatch.await(5, TimeUnit.SECONDS);
+        assertTrue(gotComboBroadcast, "Expected both players to receive combo chat announcement");
+
+        Thread.sleep(150);
+
+        // Verify top card is now BLUE_NINE (last card of played combo)
+        assertEquals(new Card(CardColor.BLUE, CardValue.NINE), engine.getDiscardPile().getTopCard().orElseThrow());
+
+        // Verify turn advanced to the next player
+        assertEquals(nextPlayerName, engine.getTurnManager().getCurrentPlayer().getUsername());
+
+        // Clean closure
         wsAlice.sendClose(WebSocket.NORMAL_CLOSURE, "Bye");
         wsBob.sendClose(WebSocket.NORMAL_CLOSURE, "Bye");
     }

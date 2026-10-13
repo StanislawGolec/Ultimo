@@ -8,6 +8,7 @@ import pl.ultimo.core.model.Player;
 import pl.ultimo.core.state.GameState;
 import pl.ultimo.core.state.TurnManager;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -38,17 +39,27 @@ public class UltimoEngine {
     public record PlayResult(
             boolean success,
             String errorMessage,
-            Card playedCard,
+            List<Card> playedCards,
             boolean isUltimo,
             boolean isGameOver,
             Player winner
     ) {
+        public Card playedCard() {
+            return playedCards != null && !playedCards.isEmpty()
+                    ? playedCards.get(playedCards.size() - 1)
+                    : null;
+        }
+
         public static PlayResult failure(String errorMessage) {
-            return new PlayResult(false, errorMessage, null, false, false, null);
+            return new PlayResult(false, errorMessage, List.of(), false, false, null);
+        }
+
+        public static PlayResult success(List<Card> cards, boolean isUltimo, boolean isGameOver, Player winner) {
+            return new PlayResult(true, null, cards, isUltimo, isGameOver, winner);
         }
 
         public static PlayResult success(Card card, boolean isUltimo, boolean isGameOver, Player winner) {
-            return new PlayResult(true, null, card, isUltimo, isGameOver, winner);
+            return new PlayResult(true, null, List.of(card), isUltimo, isGameOver, winner);
         }
     }
 
@@ -100,23 +111,33 @@ public class UltimoEngine {
     }
 
     /**
-     * Attempts to play a card from the active player's hand.
+     * Attempts to play a single card from the active player's hand.
      */
     public PlayResult playCard(Player player, Card card, CardColor chosenWildColor) {
+        return playCards(player, List.of(card), chosenWildColor);
+    }
+
+    /**
+     * Attempts to play one or more cards (multi-card combo) from the active player's hand.
+     */
+    public PlayResult playCards(Player player, List<Card> cards, CardColor chosenWildColor) {
         if (!isGameStarted) {
             return PlayResult.failure("Game has not started yet");
         }
         if (isGameOver) {
             return PlayResult.failure("Game is already over");
         }
+        if (cards == null || cards.isEmpty()) {
+            return PlayResult.failure("No cards specified to play");
+        }
 
         Card topCard = discardPile.getTopCard().orElse(null);
         CardColor activeColor = discardPile.getActiveColor();
 
-        Optional<String> validationError = MoveValidator.validateMove(
+        Optional<String> validationError = MoveValidator.validateMultiMove(
                 player,
                 turnManager.getCurrentPlayer(),
-                card,
+                cards,
                 topCard,
                 activeColor,
                 chosenWildColor
@@ -126,25 +147,39 @@ public class UltimoEngine {
             return PlayResult.failure(validationError.get());
         }
 
-        // Remove card from player hand and place on discard pile
-        player.getHand().removeCard(card);
-        CardColor effectiveColor = card.isWild() ? chosenWildColor : card.color();
-        discardPile.playCard(card, effectiveColor);
+        // Determine card play order: a card that matches table must be placed first as initiator
+        List<Card> orderedCards = new ArrayList<>(cards);
+        if (!MoveValidator.isValidPlay(orderedCards.get(0), topCard, activeColor)) {
+            for (int i = 1; i < orderedCards.size(); i++) {
+                if (MoveValidator.isValidPlay(orderedCards.get(i), topCard, activeColor)) {
+                    Card initiator = orderedCards.remove(i);
+                    orderedCards.add(0, initiator);
+                    break;
+                }
+            }
+        }
+
+        // Remove cards from player hand and place onto discard pile in order
+        for (Card card : orderedCards) {
+            player.getHand().removeCard(card);
+            CardColor effectiveColor = card.isWild() ? chosenWildColor : card.color();
+            discardPile.playCard(card, effectiveColor);
+        }
 
         // Check if player has won
         if (player.getHand().isEmpty()) {
             this.isGameOver = true;
             this.winner = player;
-            return PlayResult.success(card, false, true, player);
+            return PlayResult.success(orderedCards, false, true, player);
         }
 
         boolean isUltimo = player.getHand().size() == 1;
 
-        // Apply card action effects
-        applyCardAction(card);
+        // Apply combo action effects
+        applyComboAction(orderedCards);
 
         this.hasDrawnThisTurn = false;
-        return PlayResult.success(card, isUltimo, false, null);
+        return PlayResult.success(orderedCards, isUltimo, false, null);
     }
 
     /**
@@ -234,25 +269,33 @@ public class UltimoEngine {
         return Optional.of(new GameResult(winner, Collections.unmodifiableMap(scores)));
     }
 
-    private void applyCardAction(Card card) {
-        switch (card.value()) {
-            case SKIP -> turnManager.skipTurn();
+    private void applyComboAction(List<Card> cards) {
+        int count = cards.size();
+        Card lastCard = cards.get(cards.size() - 1);
+        switch (lastCard.value()) {
+            case SKIP -> turnManager.advanceTurn(1 + count);
             case REVERSE -> {
                 if (turnManager.isTwoPlayerGame()) {
-                    turnManager.skipTurn(); // In 2-player Ultimo, Reverse acts as a Skip
+                    if (count % 2 == 1) {
+                        turnManager.advanceTurn(2); // In 2-player Ultimo, odd number of reverses acts as Skip
+                    } else {
+                        turnManager.advanceTurn(1); // Even number of reverses cancel out
+                    }
                 } else {
-                    turnManager.reverseDirection();
-                    turnManager.advanceTurn();
+                    for (int i = 0; i < count; i++) {
+                        turnManager.reverseDirection();
+                    }
+                    turnManager.advanceTurn(1);
                 }
             }
             case DRAW_TWO -> {
                 Player victim = turnManager.peekNextPlayer();
-                drawCardsFor(victim, 2);
+                drawCardsFor(victim, 2 * count);
                 turnManager.skipTurn();
             }
             case WILD_DRAW_FOUR -> {
                 Player victim = turnManager.peekNextPlayer();
-                drawCardsFor(victim, 4);
+                drawCardsFor(victim, 4 * count);
                 turnManager.skipTurn();
             }
             case WILD, ZERO, ONE, TWO, THREE, FOUR, FIVE, SIX, SEVEN, EIGHT, NINE -> turnManager.advanceTurn();

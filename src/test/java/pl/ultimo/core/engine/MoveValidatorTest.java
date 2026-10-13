@@ -8,6 +8,7 @@ import pl.ultimo.core.model.CardValue;
 import pl.ultimo.core.model.Player;
 import pl.ultimo.core.model.PlayerHand;
 
+import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -126,5 +127,70 @@ class MoveValidatorTest {
 
         // Neither matches Yellow 3
         assertFalse(MoveValidator.hasPlayableCard(hand, topYellowThree, CardColor.YELLOW));
+    }
+
+    @Test
+    @DisplayName("Multi-card combo with matching values and legal table match is valid")
+    void validMultiCardComboShouldPass() {
+        Player alice = new Player("1", "Alice");
+        Card redFive = new Card(CardColor.RED, CardValue.FIVE);
+        Card blueFive = new Card(CardColor.BLUE, CardValue.FIVE);
+        alice.getHand().addCard(redFive);
+        alice.getHand().addCard(blueFive);
+
+        Card topRedTwo = new Card(CardColor.RED, CardValue.TWO);
+
+        Optional<String> error = MoveValidator.validateMultiMove(
+                alice, alice, List.of(redFive, blueFive), topRedTwo, CardColor.RED, null);
+        assertTrue(error.isEmpty());
+    }
+
+    @Test
+    @DisplayName("Multi-card combo with mismatched values is rejected")
+    void mismatchedValuesInComboShouldFail() {
+        Player alice = new Player("1", "Alice");
+        Card redFive = new Card(CardColor.RED, CardValue.FIVE);
+        Card redSix = new Card(CardColor.RED, CardValue.SIX);
+        alice.getHand().addCard(redFive);
+        alice.getHand().addCard(redSix);
+
+        Card topRedTwo = new Card(CardColor.RED, CardValue.TWO);
+
+        Optional<String> error = MoveValidator.validateMultiMove(
+                alice, alice, List.of(redFive, redSix), topRedTwo, CardColor.RED, null);
+        assertTrue(error.isPresent());
+        assertTrue(error.get().contains("must share the same face value"));
+    }
+
+    @Test
+    @DisplayName("Multi-card combo fails when player lacks sufficient copies")
+    void insufficientCopiesInComboShouldFail() {
+        Player alice = new Player("1", "Alice");
+        Card redFive = new Card(CardColor.RED, CardValue.FIVE);
+        alice.getHand().addCard(redFive); // Only 1 copy
+
+        Card topRedTwo = new Card(CardColor.RED, CardValue.TWO);
+
+        Optional<String> error = MoveValidator.validateMultiMove(
+                alice, alice, List.of(redFive, redFive), topRedTwo, CardColor.RED, null);
+        assertTrue(error.isPresent());
+        assertTrue(error.get().contains("do not hold card"));
+    }
+
+    @Test
+    @DisplayName("Multi-card combo fails when none of the cards match the table state")
+    void comboMatchingNeitherColorNorValueShouldFail() {
+        Player alice = new Player("1", "Alice");
+        Card blueFive = new Card(CardColor.BLUE, CardValue.FIVE);
+        Card greenFive = new Card(CardColor.GREEN, CardValue.FIVE);
+        alice.getHand().addCard(blueFive);
+        alice.getHand().addCard(greenFive);
+
+        Card topRedTwo = new Card(CardColor.RED, CardValue.TWO);
+
+        Optional<String> error = MoveValidator.validateMultiMove(
+                alice, alice, List.of(blueFive, greenFive), topRedTwo, CardColor.RED, null);
+        assertTrue(error.isPresent());
+        assertTrue(error.get().contains("None of the cards in the combo"));
     }
 }

@@ -2,7 +2,7 @@
 
 [![Java Version](https://img.shields.io/badge/Java-21%20LTS-orange.svg)](https://openjdk.org/projects/jdk/21/)
 [![Virtual Threads](https://img.shields.io/badge/Concurrency-Virtual%20Threads%20%28Loom%29-blue.svg)](https://openjdk.org/jeps/444)
-[![Tests](https://img.shields.io/badge/Tests-67%2F67%20Passing%20%28100%25%29-brightgreen.svg)](https://junit.org/junit5/)
+[![Tests](https://img.shields.io/badge/Tests-81%2F81%20Passing%20%28100%25%29-brightgreen.svg)](https://junit.org/junit5/)
 [![WebSockets](https://img.shields.io/badge/WebSockets-RFC%206455%20Pure%20Java-9cf.svg)](#web-client--browser-gameplay)
 [![Dependencies](https://img.shields.io/badge/Runtime%20Dependencies-0%20%28Pure%20Java%20StdLib%29-success.svg)](#architectural-highlights)
 [![Docker](https://img.shields.io/badge/Docker-Multi--stage%20Alpine-2496ED.svg)](https://www.docker.com/)
@@ -65,7 +65,7 @@ Most portfolio projects rely on high-level web frameworks (Spring Boot, Socket.i
 | **Security / Anti-Cheat** | State fully sent to client (client can cheat) | **Authoritative State + Fog of War (cards hidden on server)** |
 | **Runtime Overhead** | 300MB+ memory footprint, heavy startup | **Ultra-lightweight (<60MB RSS) with Generational ZGC** |
 | **Wire Protocol** | JSON over HTTP/WebSocket | **High-speed line-delimited ASCII protocol with zero serialization overhead** |
-| **Test Suite** | Untested or simple mocked controller tests | **67 comprehensive unit, concurrency, domain, and E2E integration tests (100% green)** |
+| **Test Suite** | Untested or simple mocked controller tests | **80 comprehensive unit, concurrency, domain, and E2E integration tests (100% green)** |
 
 ---
 
@@ -258,7 +258,7 @@ Ultimo is designed for one-click cloud deployment. See the comprehensive [DEPLOY
 ## Project Directory Structure
 
 ```text
-com.ultimo
+pl.ultimo
 ├── client
 │   ├── TerminalClientApp.java       # Interactive CLI client with async event loop
 │   └── TerminalRenderer.java        # ANSI & Plain-text dual-mode card renderer
@@ -356,7 +356,7 @@ chmod +x run-server.sh run-client.sh
 ### Option C: Maven
 
 ```bash
-# 1. Run all 67 tests
+# 1. Run all 80 tests
 mvn clean test
 
 # 2. Package standalone JAR
@@ -366,7 +366,7 @@ mvn clean package
 java -jar target/ultimo-server.jar
 
 # 4. Run terminal client
-java -cp target/ultimo-server.jar com.ultimo.client.TerminalClientApp
+java -cp target/ultimo-server.jar pl.ultimo.client.TerminalClientApp
 ```
 
 ---
@@ -412,7 +412,7 @@ QUIT
 
 ## Testing & Quality Assurance
 
-The codebase includes **67 automated unit, concurrency, domain, and end-to-end integration tests**:
+The codebase includes **80 automated unit, concurrency, domain, and end-to-end integration tests**:
 
 - **Domain Tests:** Complete card distributions (108 cards), turn progression, reverse direction in 2-player vs. 3-player, skip logic, deck replenishment.
 - **Protocol Codec Tests:** Round-trip serialization/deserialization, malformed syntax resilience, wild color validation.
@@ -428,7 +428,7 @@ java -jar .tools/junit-platform-console-standalone-1.10.2.jar \
      execute --class-path "target/classes;target/test-classes" --scan-class-path
 ```
 
-All 67 tests execute in ~2.5 seconds.
+All 80 tests execute in ~2.5 seconds.
 
 ---
 

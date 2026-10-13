@@ -4,9 +4,11 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import pl.ultimo.core.engine.UltimoEngine;
 import pl.ultimo.core.model.Card;
 import pl.ultimo.core.model.CardColor;
 import pl.ultimo.core.model.CardValue;
+import pl.ultimo.core.model.Player;
 import pl.ultimo.protocol.ClientCommand;
 import pl.ultimo.protocol.ProtocolCodec;
 import pl.ultimo.protocol.ServerEvent;
@@ -245,5 +247,106 @@ class GameRoomTest {
         boolean gotError = alice.receivedEvents.stream()
                 .anyMatch(e -> e instanceof ServerEvent.ErrorEvent err && err.errorMessage().contains("Need at least 2 players"));
         assertTrue(gotError);
+    }
+
+    @Test
+    @DisplayName("Player can draw a card, and if they have legal moves, manually pass their turn")
+    void shouldAllowPlayerToDrawAndManuallyPassTurn() throws Exception {
+        GameRoom room = new GameRoom("room-draw-pass", 2);
+        executor.submit(room);
+
+        TestClient alice = createTestClient("s-1", "Alice");
+        TestClient bob = createTestClient("s-2", "Bob");
+
+        room.addPlayer(alice.session, "Alice");
+        room.addPlayer(bob.session, "Bob"); // Starts match, Alice's turn
+
+        Thread.sleep(150);
+        alice.drainEvents();
+        bob.drainEvents();
+
+        // Alice sends DRAW
+        room.enqueueCommand(alice.session, new ClientCommand.Draw());
+        Thread.sleep(150);
+        alice.drainEvents();
+        bob.drainEvents();
+
+        // Verify Alice received DrawResult
+        assertTrue(alice.receivedEvents.stream().anyMatch(e -> e instanceof ServerEvent.DrawResult));
+
+        // If Alice still has the turn (i.e. has legal moves), test manual pass
+        boolean aliceStillActive = alice.receivedEvents.stream()
+                .filter(e -> e instanceof ServerEvent.TurnAnnounced)
+                .map(e -> ((ServerEvent.TurnAnnounced) e).activePlayerName())
+                .reduce((first, second) -> second)
+                .map(name -> name.equals("Alice"))
+                .orElse(false);
+
+        if (aliceStillActive) {
+            room.enqueueCommand(alice.session, new ClientCommand.Pass());
+            Thread.sleep(150);
+            alice.drainEvents();
+            bob.drainEvents();
+
+            boolean turnMovedToBob = alice.receivedEvents.stream()
+                    .filter(e -> e instanceof ServerEvent.TurnAnnounced)
+                    .map(e -> ((ServerEvent.TurnAnnounced) e).activePlayerName())
+                    .reduce((first, second) -> second)
+                    .map(name -> name.equals("Bob"))
+                    .orElse(false);
+            assertTrue(turnMovedToBob);
+        }
+    }
+
+    @Test
+    @DisplayName("Auto-pass is triggered when player draws and has zero legal moves in hand")
+    void shouldAutoPassWhenPlayerDrawsWithNoPlayableMoves() throws Exception {
+        GameRoom room = new GameRoom("room-autopass", 2);
+        executor.submit(room);
+
+        TestClient alice = createTestClient("s-1", "Alice");
+        TestClient bob = createTestClient("s-2", "Bob");
+
+        room.addPlayer(alice.session, "Alice");
+        room.addPlayer(bob.session, "Bob"); // Starts match, Alice's turn
+
+        Thread.sleep(150);
+        alice.drainEvents();
+        bob.drainEvents();
+
+        UltimoEngine engine = room.getEngine();
+        assertNotNull(engine);
+
+        // Make discard top card RED FIVE
+        engine.getDiscardPile().playCard(new Card(CardColor.RED, CardValue.FIVE), CardColor.RED);
+
+        // Clear Alice's hand and replace with single unplayable card: BLUE ZERO
+        Player current = engine.getTurnManager().getCurrentPlayer();
+        assertEquals("Alice", current.getUsername());
+        current.getHand().clear();
+        current.getHand().addCard(new Card(CardColor.BLUE, CardValue.ZERO));
+
+        // Drain existing deck and set only unplayable card on RED FIVE (GREEN SEVEN)
+        while (!engine.getDeck().isEmpty()) {
+            engine.getDeck().draw();
+        }
+        engine.getDeck().replenishFromDiscard(List.of(new Card(CardColor.GREEN, CardValue.SEVEN)));
+
+        // Alice draws
+        room.enqueueCommand(alice.session, new ClientCommand.Draw());
+        Thread.sleep(200);
+        alice.drainEvents();
+        bob.drainEvents();
+
+        // Alice received DRAW_RESULT
+        assertTrue(alice.receivedEvents.stream().anyMatch(e -> e instanceof ServerEvent.DrawResult));
+
+        // Auto-pass broadcast was emitted to chat
+        boolean gotAutoPassChat = alice.receivedEvents.stream()
+                .anyMatch(e -> e instanceof ServerEvent.ChatBroadcast chat && chat.message().contains("no playable moves. Turn passed."));
+        assertTrue(gotAutoPassChat);
+
+        // Turn automatically advanced to Bob
+        assertEquals("Bob", engine.getTurnManager().getCurrentPlayer().getUsername());
     }
 }

@@ -47,7 +47,14 @@ public class TurnManager {
      * Advances the turn to the next player in the current direction.
      */
     public Player advanceTurn() {
-        currentIndex = calculateNextIndex(1);
+        return advanceTurn(1);
+    }
+
+    /**
+     * Advances the turn by a specified number of steps in the current direction.
+     */
+    public Player advanceTurn(int steps) {
+        currentIndex = calculateNextIndex(steps);
         return getCurrentPlayer();
     }
 
@@ -55,8 +62,7 @@ public class TurnManager {
      * Skips the next player, advancing the turn to the player after them.
      */
     public Player skipTurn() {
-        currentIndex = calculateNextIndex(2);
-        return getCurrentPlayer();
+        return advanceTurn(2);
     }
 
     /**

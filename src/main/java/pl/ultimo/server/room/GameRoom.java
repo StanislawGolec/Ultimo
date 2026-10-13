@@ -1,5 +1,6 @@
 package pl.ultimo.server.room;
 
+import pl.ultimo.core.engine.MoveValidator;
 import pl.ultimo.core.engine.UltimoEngine;
 import pl.ultimo.core.model.Card;
 import pl.ultimo.core.model.Player;
@@ -169,10 +170,15 @@ public class GameRoom implements Runnable {
             return;
         }
 
-        UltimoEngine.PlayResult result = engine.playCard(player, play.card(), play.chosenWildColor());
+        UltimoEngine.PlayResult result = engine.playCards(player, play.cards(), play.chosenWildColor());
         if (!result.success()) {
             session.sendEvent(new ServerEvent.ErrorEvent(result.errorMessage()));
             return;
+        }
+
+        if (play.cards().size() > 1) {
+            broadcast(new ServerEvent.ChatBroadcast("GAME",
+                    player.getUsername() + " played a combo of " + play.cards().size() + " cards!"));
         }
 
         if (result.isUltimo()) {
@@ -205,6 +211,18 @@ public class GameRoom implements Runnable {
         }
 
         session.sendEvent(new ServerEvent.DrawResult(drawnCard.get()));
+
+        // Check if player has any legally playable cards in hand after drawing
+        GameState snapshot = engine.captureSnapshot();
+        boolean hasPlayable = MoveValidator.hasPlayableCard(player.getHand(), snapshot.topCard(), snapshot.activeColor());
+
+        if (!hasPlayable) {
+            // Auto-pass: player drew a card and has zero legal moves
+            engine.passTurn(player);
+            broadcast(new ServerEvent.ChatBroadcast("GAME",
+                    player.getUsername() + " drew a card (" + drawnCard.get() + ") but has no playable moves. Turn passed."));
+        }
+
         broadcastGameState();
     }
 
@@ -223,6 +241,7 @@ public class GameRoom implements Runnable {
             return;
         }
 
+        broadcast(new ServerEvent.ChatBroadcast("GAME", player.getUsername() + " passed their turn."));
         broadcastGameState();
     }
 

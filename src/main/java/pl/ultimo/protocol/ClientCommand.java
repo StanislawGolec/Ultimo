@@ -3,6 +3,8 @@ package pl.ultimo.protocol;
 import pl.ultimo.core.model.Card;
 import pl.ultimo.core.model.CardColor;
 
+import java.util.List;
+
 /**
  * Type-safe, sealed model representing all incoming client commands.
  */
@@ -17,7 +19,15 @@ public sealed interface ClientCommand {
         }
     }
 
-    record Play(Card card, CardColor chosenWildColor) implements ClientCommand {
+    record Play(List<Card> cards, CardColor chosenWildColor) implements ClientCommand {
+        public Play(Card card, CardColor chosenWildColor) {
+            this(List.of(card), chosenWildColor);
+        }
+
+        public Card card() {
+            return cards != null && !cards.isEmpty() ? cards.get(0) : null;
+        }
+
         @Override
         public CommandType type() {
             return CommandType.PLAY;

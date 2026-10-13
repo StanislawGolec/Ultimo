@@ -171,4 +171,50 @@ class ProtocolCodecTest {
         assertThrows(ProtocolException.class, () -> ProtocolCodec.parseCard("PURPLE_FIVE"));
         assertThrows(ProtocolException.class, () -> ProtocolCodec.parseCard("RED_ELEVEN"));
     }
+
+    @Test
+    @DisplayName("Should decode multi-card PLAY command with comma-separated cards")
+    void shouldDecodeMultiCardCommaSeparated() throws ProtocolException {
+        ClientCommand cmd = ProtocolCodec.decodeCommand("PLAY RED_FIVE,BLUE_FIVE");
+        assertInstanceOf(ClientCommand.Play.class, cmd);
+        ClientCommand.Play play = (ClientCommand.Play) cmd;
+        assertEquals(2, play.cards().size());
+        assertEquals(new Card(CardColor.RED, CardValue.FIVE), play.cards().get(0));
+        assertEquals(new Card(CardColor.BLUE, CardValue.FIVE), play.cards().get(1));
+        assertNull(play.chosenWildColor());
+    }
+
+    @Test
+    @DisplayName("Should decode multi-card PLAY command with space-separated cards")
+    void shouldDecodeMultiCardSpaceSeparated() throws ProtocolException {
+        ClientCommand cmd = ProtocolCodec.decodeCommand("PLAY RED_FIVE BLUE_FIVE");
+        assertInstanceOf(ClientCommand.Play.class, cmd);
+        ClientCommand.Play play = (ClientCommand.Play) cmd;
+        assertEquals(2, play.cards().size());
+        assertEquals(new Card(CardColor.RED, CardValue.FIVE), play.cards().get(0));
+        assertEquals(new Card(CardColor.BLUE, CardValue.FIVE), play.cards().get(1));
+        assertNull(play.chosenWildColor());
+    }
+
+    @Test
+    @DisplayName("Should decode multi-card PLAY command with Wild cards and declared color")
+    void shouldDecodeMultiCardWithWildCards() throws ProtocolException {
+        ClientCommand cmd = ProtocolCodec.decodeCommand("PLAY WILD,WILD GREEN");
+        assertInstanceOf(ClientCommand.Play.class, cmd);
+        ClientCommand.Play play = (ClientCommand.Play) cmd;
+        assertEquals(2, play.cards().size());
+        assertEquals(new Card(CardColor.WILD, CardValue.WILD), play.cards().get(0));
+        assertEquals(new Card(CardColor.WILD, CardValue.WILD), play.cards().get(1));
+        assertEquals(CardColor.GREEN, play.chosenWildColor());
+    }
+
+    @Test
+    @DisplayName("Should encode multi-card PLAY command to wire format")
+    void shouldEncodeMultiCardPlayCommand() {
+        ClientCommand.Play play = new ClientCommand.Play(
+                List.of(new Card(CardColor.RED, CardValue.FIVE), new Card(CardColor.BLUE, CardValue.FIVE)),
+                null
+        );
+        assertEquals("PLAY RED_FIVE,BLUE_FIVE\n", ProtocolCodec.encodeCommand(play));
+    }
 }
