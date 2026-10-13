@@ -1,0 +1,25 @@
+# Git and version control
+.git
+.gitignore
+.gitattributes
+
+# Build outputs and tools
+target/
+.tools/
+
+# IDE configurations
+.idea/
+.vscode/
+*.iml
+
+# Host launch scripts (not needed in container build)
+*.bat
+*.sh
+
+# Documentation and logs
+*.md
+*.log
+
+# OS metadata
+.DS_Store
+Thumbs.db

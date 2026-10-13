@@ -1,0 +1,18 @@
+package pl.ultimo.protocol;
+
+/**
+ * Events and notifications emitted by the authoritative server to clients.
+ */
+public enum EventType {
+    WELCOME,
+    ROOM_STATUS,
+    HAND_UPDATE,
+    TOP_CARD,
+    TURN_ANNOUNCED,
+    OPPONENT_UPDATE,
+    DRAW_RESULT,
+    ERROR,
+    CHAT_BROADCAST,
+    GAME_OVER,
+    PONG;
+}
