@@ -10,10 +10,12 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Manages active rooms, handles matchmaking for incoming players,
  * and lifecycle cleanup of completed rooms.
+ * Uses ReentrantLock and Virtual Threads for zero-pinning high scalability.
  */
 public class RoomManager {
 
@@ -21,7 +23,8 @@ public class RoomManager {
     private final Map<String, GameRoom> activeRooms = new ConcurrentHashMap<>();
     private final Map<String, GameRoom> sessionRoomMap = new ConcurrentHashMap<>();
     private final AtomicInteger roomCounter = new AtomicInteger(1);
-    private final ExecutorService roomExecutor = Executors.newCachedThreadPool();
+    private final ExecutorService roomExecutor = Executors.newVirtualThreadPerTaskExecutor();
+    private final ReentrantLock matchmakeLock = new ReentrantLock();
 
     public RoomManager(ServerConfig config) {
         this.config = config;
@@ -30,31 +33,37 @@ public class RoomManager {
 
     /**
      * Finds an open room with capacity or creates a new one, enrolling the player.
+     * Uses ReentrantLock to prevent Project Loom carrier thread pinning.
      */
-    public synchronized GameRoom matchmake(ClientSession session, String username) {
-        // Look for an existing room waiting for players
-        for (GameRoom room : activeRooms.values()) {
-            if (room.getState() == RoomState.WAITING_FOR_PLAYERS && !room.isFull()) {
-                boolean added = room.addPlayer(session, username);
-                if (added) {
-                    sessionRoomMap.put(session.getSessionId(), room);
-                    return room;
+    public GameRoom matchmake(ClientSession session, String username) {
+        matchmakeLock.lock();
+        try {
+            // Look for an existing room waiting for players
+            for (GameRoom room : activeRooms.values()) {
+                if (room.getState() == RoomState.WAITING_FOR_PLAYERS && !room.isFull()) {
+                    boolean added = room.addPlayer(session, username);
+                    if (added) {
+                        sessionRoomMap.put(session.getSessionId(), room);
+                        return room;
+                    }
                 }
             }
+
+            // If no available room, spin up a new room
+            String roomId = "room-" + roomCounter.getAndIncrement();
+            GameRoom newRoom = new GameRoom(roomId, config.defaultRoomCapacity());
+            newRoom.addPlayer(session, username);
+
+            activeRooms.put(roomId, newRoom);
+            sessionRoomMap.put(session.getSessionId(), newRoom);
+
+            // Run the room on its own dedicated virtual thread event loop
+            roomExecutor.submit(newRoom);
+
+            return newRoom;
+        } finally {
+            matchmakeLock.unlock();
         }
-
-        // If no available room, spin up a new room
-        String roomId = "room-" + roomCounter.getAndIncrement();
-        GameRoom newRoom = new GameRoom(roomId, config.defaultRoomCapacity());
-        newRoom.addPlayer(session, username);
-
-        activeRooms.put(roomId, newRoom);
-        sessionRoomMap.put(session.getSessionId(), newRoom);
-
-        // Run the room on its own dedicated event-loop worker thread
-        roomExecutor.submit(newRoom);
-
-        return newRoom;
     }
 
     public Optional<GameRoom> getRoomForSession(String sessionId) {
@@ -66,6 +75,7 @@ public class RoomManager {
 
     /**
      * Handles player disconnect, notifying the corresponding room and cleaning up empty rooms.
+     * Purges all session and room references to eliminate memory leaks.
      */
     public void handleDisconnect(ClientSession session) {
         if (session == null) {
@@ -78,6 +88,7 @@ public class RoomManager {
 
             if (room.getState() == RoomState.FINISHED || room.getPlayerCount() == 0) {
                 activeRooms.remove(room.getRoomId());
+                sessionRoomMap.entrySet().removeIf(entry -> entry.getValue().getRoomId().equals(room.getRoomId()));
                 room.stop();
             }
         }

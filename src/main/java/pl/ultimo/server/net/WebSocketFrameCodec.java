@@ -160,6 +160,13 @@ public final class WebSocketFrameCodec {
     }
 
     /**
+     * Writes a ping frame to probe client liveness.
+     */
+    public static void writePingFrame(OutputStream out, byte[] payload) throws IOException {
+        writeFrame(out, OPCODE_PING, payload != null ? payload : new byte[0]);
+    }
+
+    /**
      * Encodes and writes a WebSocket frame according to RFC 6455 Section 5.1 (server frames are unmasked).
      */
     public static void writeFrame(OutputStream out, int opcode, byte[] payload) throws IOException {

@@ -20,11 +20,17 @@ import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Universal client session handling both Raw TCP wire socket connections and RFC 6455 WebSockets.
- * Automatically multiplexes protocol based on the initial handshake headers on a single TCP port.
+ * Employs non-blocking outbound queue serialization and ReentrantLock to completely eliminate
+ * Project Loom Virtual Thread carrier pinning.
  */
 public class ClientSession implements Runnable, Closeable {
 
@@ -32,21 +38,37 @@ public class ClientSession implements Runnable, Closeable {
     private final Socket socket;
     private final ConnectionListener listener;
     private final AtomicBoolean isClosed = new AtomicBoolean(false);
-    private final Object writeLock = new Object();
+    private final ReentrantLock writeLock = new ReentrantLock();
 
     private final InputStream rawInputStream;
     private final OutputStream rawOutputStream;
+
+    private final BlockingQueue<ServerEvent> outboundQueue = new LinkedBlockingQueue<>(1024);
+    private volatile Thread outboundWriterThread;
+    private final int idleTimeoutMillis;
+    private final AtomicLong lastActivityMillis = new AtomicLong(System.currentTimeMillis());
+    private int consecutiveTimeouts = 0;
 
     private volatile boolean isWebSocket = false;
     private volatile String username;
 
     public ClientSession(String sessionId, Socket socket, ConnectionListener listener) throws IOException {
+        this(sessionId, socket, listener, 60_000);
+    }
+
+    public ClientSession(String sessionId, Socket socket, ConnectionListener listener, int idleTimeoutMillis) throws IOException {
         this.sessionId = Objects.requireNonNull(sessionId, "sessionId must not be null");
         this.socket = Objects.requireNonNull(socket, "socket must not be null");
         this.listener = Objects.requireNonNull(listener, "listener must not be null");
+        this.idleTimeoutMillis = idleTimeoutMillis;
 
         this.rawInputStream = socket.getInputStream();
         this.rawOutputStream = socket.getOutputStream();
+
+        if (idleTimeoutMillis > 0) {
+            int checkInterval = Math.max(50, idleTimeoutMillis / 2);
+            socket.setSoTimeout(checkInterval);
+        }
 
         MetricsRegistry.getInstance().recordConnectionOpened(false);
     }
@@ -67,6 +89,7 @@ public class ClientSession implements Runnable, Closeable {
                     close();
                     return;
                 }
+                startOutboundWriter();
                 handleTcpConnection(firstLine);
             }
         } catch (IOException e) {
@@ -75,6 +98,28 @@ public class ClientSession implements Runnable, Closeable {
             }
         } finally {
             close();
+        }
+    }
+
+    private void startOutboundWriter() {
+        this.outboundWriterThread = Thread.ofVirtual().name("session-writer-" + sessionId).start(this::runOutboundLoop);
+    }
+
+    private void runOutboundLoop() {
+        try {
+            while (!isClosed.get()) {
+                ServerEvent event = outboundQueue.poll(200, TimeUnit.MILLISECONDS);
+                if (event == null) {
+                    continue;
+                }
+                writeEventDirectly(event);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (Exception e) {
+            if (!isClosed.get()) {
+                close();
+            }
         }
     }
 
@@ -100,13 +145,17 @@ public class ClientSession implements Runnable, Closeable {
                         + "Connection: Upgrade\r\n"
                         + "Sec-WebSocket-Accept: " + acceptKey + "\r\n\r\n";
 
-                synchronized (writeLock) {
+                writeLock.lock();
+                try {
                     rawOutputStream.write(handshakeResponse.getBytes(StandardCharsets.UTF_8));
                     rawOutputStream.flush();
+                } finally {
+                    writeLock.unlock();
                 }
 
                 this.isWebSocket = true;
                 MetricsRegistry.getInstance().recordWebSocketUpgrade();
+                startOutboundWriter();
                 runWebSocketLoop();
                 return;
             }
@@ -154,10 +203,13 @@ public class ClientSession implements Runnable, Closeable {
                 + "Content-Length: " + body.length + "\r\n"
                 + "Connection: close\r\n\r\n";
 
-        synchronized (writeLock) {
+        writeLock.lock();
+        try {
             rawOutputStream.write(responseHeader.getBytes(StandardCharsets.UTF_8));
             rawOutputStream.write(body);
             rawOutputStream.flush();
+        } finally {
+            writeLock.unlock();
         }
         close();
     }
@@ -169,25 +221,48 @@ public class ClientSession implements Runnable, Closeable {
                 try {
                     frame = WebSocketFrameCodec.readFrame(rawInputStream);
                 } catch (SocketTimeoutException e) {
-                    synchronized (writeLock) {
-                        WebSocketFrameCodec.writePongFrame(rawOutputStream, new byte[0]);
+                    if (idleTimeoutMillis > 0) {
+                        consecutiveTimeouts++;
+                        if (consecutiveTimeouts >= 2) {
+                            System.out.println("Session " + sessionId + " idle timeout exceeded without heartbeat. Closing.");
+                            break;
+                        }
+                        writeLock.lock();
+                        try {
+                            WebSocketFrameCodec.writePingFrame(rawOutputStream, new byte[0]);
+                        } finally {
+                            writeLock.unlock();
+                        }
                     }
                     continue;
                 }
 
                 if (frame == null || frame.isClose()) {
                     if (frame != null && frame.isClose()) {
-                        synchronized (writeLock) {
+                        writeLock.lock();
+                        try {
                             WebSocketFrameCodec.writeCloseFrame(rawOutputStream);
+                        } finally {
+                            writeLock.unlock();
                         }
                     }
                     break;
                 }
 
+                consecutiveTimeouts = 0;
+                lastActivityMillis.set(System.currentTimeMillis());
+
                 if (frame.isPing()) {
-                    synchronized (writeLock) {
+                    writeLock.lock();
+                    try {
                         WebSocketFrameCodec.writePongFrame(rawOutputStream, frame.payload());
+                    } finally {
+                        writeLock.unlock();
                     }
+                    continue;
+                }
+
+                if (frame.isPong()) {
                     continue;
                 }
 
@@ -216,13 +291,23 @@ public class ClientSession implements Runnable, Closeable {
             try {
                 line = reader.readLine();
             } catch (SocketTimeoutException e) {
-                sendEvent(new ServerEvent.Pong());
+                if (idleTimeoutMillis > 0) {
+                    consecutiveTimeouts++;
+                    if (consecutiveTimeouts >= 2) {
+                        System.out.println("Session " + sessionId + " idle timeout exceeded without heartbeat. Closing.");
+                        break;
+                    }
+                    sendEvent(new ServerEvent.Pong());
+                }
                 continue;
             }
 
             if (line == null) {
                 break;
             }
+
+            consecutiveTimeouts = 0;
+            lastActivityMillis.set(System.currentTimeMillis());
 
             if (line.isBlank()) {
                 continue;
@@ -243,8 +328,8 @@ public class ClientSession implements Runnable, Closeable {
     }
 
     /**
-     * Sends a ServerEvent to the connected client.
-     * Automatically formats the event as an RFC 6455 text frame or a raw newline-terminated TCP string.
+     * Sends a ServerEvent to the connected client asynchronously.
+     * Enqueues to the dedicated outbound queue so that slow clients cannot stall the caller.
      */
     public void sendEvent(ServerEvent event) {
         if (isClosed.get()) {
@@ -256,22 +341,39 @@ public class ClientSession implements Runnable, Closeable {
             MetricsRegistry.getInstance().recordError("ERROR_EVENT");
         }
 
-        synchronized (writeLock) {
-            if (isClosed.get()) {
-                return;
+        Thread writer = this.outboundWriterThread;
+        if (writer != null && writer.isAlive()) {
+            boolean enqueued = outboundQueue.offer(event);
+            if (!enqueued) {
+                MetricsRegistry.getInstance().recordError("QUEUE_OVERFLOW");
+                System.err.println("Session " + sessionId + " outbound queue full, dropping connection.");
+                close();
             }
+        } else {
             try {
-                if (isWebSocket) {
-                    String wire = ProtocolCodec.encodeEvent(event).trim();
-                    WebSocketFrameCodec.writeTextFrame(rawOutputStream, wire);
-                } else {
-                    String wire = ProtocolCodec.encodeEvent(event);
-                    rawOutputStream.write(wire.getBytes(StandardCharsets.UTF_8));
-                    rawOutputStream.flush();
-                }
+                writeEventDirectly(event);
             } catch (IOException e) {
                 close();
             }
+        }
+    }
+
+    private void writeEventDirectly(ServerEvent event) throws IOException {
+        writeLock.lock();
+        try {
+            if (isClosed.get()) {
+                return;
+            }
+            if (isWebSocket) {
+                String wire = ProtocolCodec.encodeEvent(event).trim();
+                WebSocketFrameCodec.writeTextFrame(rawOutputStream, wire);
+            } else {
+                String wire = ProtocolCodec.encodeEvent(event);
+                rawOutputStream.write(wire.getBytes(StandardCharsets.UTF_8));
+                rawOutputStream.flush();
+            }
+        } finally {
+            writeLock.unlock();
         }
     }
 
@@ -316,10 +418,17 @@ public class ClientSession implements Runnable, Closeable {
         return socket;
     }
 
+    public long getLastActivityMillis() {
+        return lastActivityMillis.get();
+    }
+
     @Override
     public void close() {
         if (isClosed.compareAndSet(false, true)) {
             MetricsRegistry.getInstance().recordConnectionClosed(isWebSocket);
+            if (outboundWriterThread != null) {
+                outboundWriterThread.interrupt();
+            }
             try {
                 socket.close();
             } catch (IOException ignored) {

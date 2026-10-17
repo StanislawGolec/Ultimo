@@ -182,7 +182,7 @@ public class ServerApp implements ConnectionListener {
 
         try {
             String sessionId = UUID.randomUUID().toString();
-            ClientSession session = new ClientSession(sessionId, socket, this);
+            ClientSession session = new ClientSession(sessionId, socket, this, config.socketReadTimeoutMillis());
             activeSessions.put(sessionId, session);
             sessionExecutor.submit(session);
         } catch (IOException e) {
@@ -196,6 +196,11 @@ public class ServerApp implements ConnectionListener {
 
     @Override
     public void onCommandReceived(ClientSession session, ClientCommand command) {
+        if (command instanceof ClientCommand.Ping) {
+            session.sendEvent(new ServerEvent.Pong());
+            return;
+        }
+
         if (command instanceof ClientCommand.Join join) {
             long startNanos = System.nanoTime();
             try {
