@@ -68,4 +68,25 @@ public sealed interface ClientCommand {
             return CommandType.START;
         }
     }
+
+    record Ultimo() implements ClientCommand {
+        @Override
+        public CommandType type() {
+            return CommandType.ULTIMO;
+        }
+    }
+
+    record CatchUltimo(String targetUsername) implements ClientCommand {
+        @Override
+        public CommandType type() {
+            return CommandType.CATCH_ULTIMO;
+        }
+    }
+
+    record ChallengeWildFour() implements ClientCommand {
+        @Override
+        public CommandType type() {
+            return CommandType.CHALLENGE_WILD_FOUR;
+        }
+    }
 }

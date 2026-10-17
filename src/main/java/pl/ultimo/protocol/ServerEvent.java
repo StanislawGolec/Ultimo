@@ -95,4 +95,32 @@ public sealed interface ServerEvent {
             return EventType.SERVER_SHUTDOWN;
         }
     }
+
+    record UltimoDeclared(String playerName) implements ServerEvent {
+        @Override
+        public EventType type() {
+            return EventType.ULTIMO_DECLARED;
+        }
+    }
+
+    record UltimoPenalty(String penalizedPlayer, String challenger, int penaltyCards) implements ServerEvent {
+        @Override
+        public EventType type() {
+            return EventType.ULTIMO_PENALTY;
+        }
+    }
+
+    record ChallengeResult(String challenger, String offender, boolean isGuilty, String penalizedPlayer, int penaltyCards) implements ServerEvent {
+        @Override
+        public EventType type() {
+            return EventType.CHALLENGE_RESULT;
+        }
+    }
+
+    record RoundOver(String roundWinner, int pointsEarned, java.util.Map<String, Integer> tournamentScores, boolean isTournamentWon) implements ServerEvent {
+        @Override
+        public EventType type() {
+            return EventType.ROUND_OVER;
+        }
+    }
 }

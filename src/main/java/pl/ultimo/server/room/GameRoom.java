@@ -1,5 +1,6 @@
 package pl.ultimo.server.room;
 
+import pl.ultimo.core.engine.GameResult;
 import pl.ultimo.core.engine.MoveValidator;
 import pl.ultimo.core.engine.UltimoEngine;
 import pl.ultimo.core.model.Card;
@@ -162,6 +163,9 @@ public class GameRoom implements Runnable {
                 case ClientCommand.Pass pass -> handlePass(session, player);
                 case ClientCommand.Chat chat -> handleChat(session, chat);
                 case ClientCommand.Ping ping -> session.sendEvent(new ServerEvent.Pong());
+                case ClientCommand.Ultimo ultimo -> handleUltimo(session, player);
+                case ClientCommand.CatchUltimo catchUltimo -> handleCatchUltimo(session, player, catchUltimo);
+                case ClientCommand.ChallengeWildFour challenge -> handleChallengeWildFour(session, player);
                 default -> session.sendEvent(new ServerEvent.ErrorEvent("Unsupported command in room: " + command.type()));
             }
         } finally {
@@ -215,6 +219,13 @@ public class GameRoom implements Runnable {
         }
 
         if (result.isGameOver()) {
+            Optional<GameResult> resultOpt = engine.getResult();
+            if (resultOpt.isPresent()) {
+                GameResult gr = resultOpt.get();
+                broadcast(new ServerEvent.RoundOver(gr.winner().getUsername(), gr.roundPoints(), gr.cumulativeScores(), gr.isTournamentWon()));
+                broadcast(new ServerEvent.ChatBroadcast("GAME", gr.winner().getUsername() + " won the round! Points earned: +" + gr.roundPoints()));
+            }
+
             this.state = RoomState.FINISHED;
             broadcastGameState();
             broadcast(new ServerEvent.GameOver(result.winner().getUsername()));
@@ -224,6 +235,62 @@ public class GameRoom implements Runnable {
         broadcastGameState();
     }
 
+    private void handleUltimo(ClientSession session, Player player) {
+        if (state != RoomState.IN_PROGRESS || engine == null) {
+            session.sendEvent(new ServerEvent.ErrorEvent("Match is not currently in progress"));
+            return;
+        }
+        if (player == null) {
+            return;
+        }
+
+        boolean declared = engine.declareUltimo(player);
+        if (declared) {
+            broadcast(new ServerEvent.UltimoDeclared(player.getUsername()));
+            broadcast(new ServerEvent.ChatBroadcast("GAME", player.getUsername() + " declared ULTIMO!"));
+        } else {
+            session.sendEvent(new ServerEvent.ErrorEvent("Cannot declare ULTIMO (hand size must be 1 or 2 cards)"));
+        }
+    }
+
+    private void handleCatchUltimo(ClientSession session, Player player, ClientCommand.CatchUltimo cmd) {
+        if (state != RoomState.IN_PROGRESS || engine == null) {
+            session.sendEvent(new ServerEvent.ErrorEvent("Match is not currently in progress"));
+            return;
+        }
+        if (player == null) {
+            return;
+        }
+
+        UltimoEngine.CatchResult res = engine.catchUltimo(player, cmd.targetUsername());
+        if (res.success()) {
+            broadcast(new ServerEvent.UltimoPenalty(res.penalizedPlayer().getUsername(), player.getUsername(), res.penaltyCards()));
+            broadcast(new ServerEvent.ChatBroadcast("GAME", res.message()));
+            broadcastGameState();
+        } else {
+            session.sendEvent(new ServerEvent.ErrorEvent(res.message()));
+        }
+    }
+
+    private void handleChallengeWildFour(ClientSession session, Player player) {
+        if (state != RoomState.IN_PROGRESS || engine == null) {
+            session.sendEvent(new ServerEvent.ErrorEvent("Match is not currently in progress"));
+            return;
+        }
+        if (player == null) {
+            return;
+        }
+
+        UltimoEngine.WildChallengeResult res = engine.challengeWildFour(player);
+        if (res.success()) {
+            broadcast(new ServerEvent.ChallengeResult(player.getUsername(), res.penalizedPlayer().getUsername(), res.isGuilty(), res.penalizedPlayer().getUsername(), res.cardsDrawn()));
+            broadcast(new ServerEvent.ChatBroadcast("GAME", res.message()));
+            broadcastGameState();
+        } else {
+            session.sendEvent(new ServerEvent.ErrorEvent(res.message()));
+        }
+    }
+
     private void handleDraw(ClientSession session, Player player) {
         if (state != RoomState.IN_PROGRESS || engine == null) {
             session.sendEvent(new ServerEvent.ErrorEvent("Match is not currently in progress"));
@@ -231,6 +298,17 @@ public class GameRoom implements Runnable {
         }
         if (player == null) {
             return;
+        }
+
+        boolean wasWildVictim = engine.getPendingWildChallenge() != null
+                && player.equals(engine.getPendingWildChallenge().victim());
+        if (wasWildVictim) {
+            boolean accepted = engine.acceptWildFour(player);
+            if (accepted) {
+                broadcast(new ServerEvent.ChatBroadcast("GAME", player.getUsername() + " accepted Wild Draw Four penalty (drew 4 cards and forfeited turn)."));
+                broadcastGameState();
+                return;
+            }
         }
 
         Optional<Card> drawnCard = engine.drawCard(player);
@@ -262,6 +340,17 @@ public class GameRoom implements Runnable {
         }
         if (player == null) {
             return;
+        }
+
+        boolean wasWildVictim = engine.getPendingWildChallenge() != null
+                && player.equals(engine.getPendingWildChallenge().victim());
+        if (wasWildVictim) {
+            boolean accepted = engine.acceptWildFour(player);
+            if (accepted) {
+                broadcast(new ServerEvent.ChatBroadcast("GAME", player.getUsername() + " accepted Wild Draw Four penalty (drew 4 cards and forfeited turn)."));
+                broadcastGameState();
+                return;
+            }
         }
 
         boolean passed = engine.passTurn(player);

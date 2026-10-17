@@ -121,6 +121,9 @@ class ProtocolCodecTest {
         assertEquals("PING\n", ProtocolCodec.encodeCommand(new ClientCommand.Ping()));
         assertEquals("START\n", ProtocolCodec.encodeCommand(new ClientCommand.Start()));
         assertEquals("CHAT Hi!\n", ProtocolCodec.encodeCommand(new ClientCommand.Chat("Hi!")));
+        assertEquals("ULTIMO\n", ProtocolCodec.encodeCommand(new ClientCommand.Ultimo()));
+        assertEquals("CATCH_ULTIMO Bob\n", ProtocolCodec.encodeCommand(new ClientCommand.CatchUltimo("Bob")));
+        assertEquals("CHALLENGE_WILD_FOUR\n", ProtocolCodec.encodeCommand(new ClientCommand.ChallengeWildFour()));
     }
 
     @Test
@@ -134,6 +137,10 @@ class ProtocolCodecTest {
         assertEquals("ERROR Bad move\n", ProtocolCodec.encodeEvent(new ServerEvent.ErrorEvent("Bad move")));
         assertEquals("PONG\n", ProtocolCodec.encodeEvent(new ServerEvent.Pong()));
         assertEquals("SERVER_SHUTDOWN 5\n", ProtocolCodec.encodeEvent(new ServerEvent.ServerShutdown(5)));
+        assertEquals("ULTIMO_DECLARED Alice\n", ProtocolCodec.encodeEvent(new ServerEvent.UltimoDeclared("Alice")));
+        assertEquals("ULTIMO_PENALTY Bob Alice 2\n", ProtocolCodec.encodeEvent(new ServerEvent.UltimoPenalty("Bob", "Alice", 2)));
+        assertEquals("CHALLENGE_RESULT Alice Bob GUILTY Bob 4\n", ProtocolCodec.encodeEvent(new ServerEvent.ChallengeResult("Alice", "Bob", true, "Bob", 4)));
+        assertEquals("ROUND_OVER Alice 85 IN_PROGRESS Alice:85,Bob:0\n", ProtocolCodec.encodeEvent(new ServerEvent.RoundOver("Alice", 85, java.util.Map.of("Alice", 85, "Bob", 0), false)));
     }
 
     @Test
@@ -155,7 +162,11 @@ class ProtocolCodecTest {
                 new ServerEvent.ChatBroadcast("Alice", "Well played Bob"),
                 new ServerEvent.GameOver("Bob"),
                 new ServerEvent.Pong(),
-                new ServerEvent.ServerShutdown(5)
+                new ServerEvent.ServerShutdown(5),
+                new ServerEvent.UltimoDeclared("Alice"),
+                new ServerEvent.UltimoPenalty("Bob", "Alice", 2),
+                new ServerEvent.ChallengeResult("Alice", "Bob", true, "Bob", 4),
+                new ServerEvent.RoundOver("Alice", 85, java.util.Map.of("Alice", 85, "Bob", 0), false)
         );
 
         for (ServerEvent event : testEvents) {
@@ -218,5 +229,26 @@ class ProtocolCodecTest {
                 null
         );
         assertEquals("PLAY RED_FIVE,BLUE_FIVE\n", ProtocolCodec.encodeCommand(play));
+    }
+
+    @Test
+    @DisplayName("Should decode ULTIMO, CATCH_ULTIMO, and CHALLENGE_WILD_FOUR commands")
+    void shouldDecodeUltimoAndChallengeCommands() throws ProtocolException {
+        assertInstanceOf(ClientCommand.Ultimo.class, ProtocolCodec.decodeCommand("ULTIMO"));
+        assertInstanceOf(ClientCommand.Ultimo.class, ProtocolCodec.decodeCommand("  ultimo  \r\n"));
+
+        ClientCommand catchCmd = ProtocolCodec.decodeCommand("CATCH_ULTIMO Charlie");
+        assertInstanceOf(ClientCommand.CatchUltimo.class, catchCmd);
+        assertEquals("Charlie", ((ClientCommand.CatchUltimo) catchCmd).targetUsername());
+
+        assertInstanceOf(ClientCommand.ChallengeWildFour.class, ProtocolCodec.decodeCommand("CHALLENGE_WILD_FOUR"));
+        assertInstanceOf(ClientCommand.ChallengeWildFour.class, ProtocolCodec.decodeCommand("  challenge_wild_four \n"));
+    }
+
+    @Test
+    @DisplayName("Should throw ProtocolException when CATCH_ULTIMO lacks target username")
+    void shouldThrowWhenCatchUltimoLacksTarget() {
+        assertThrows(ProtocolException.class, () -> ProtocolCodec.decodeCommand("CATCH_ULTIMO"));
+        assertThrows(ProtocolException.class, () -> ProtocolCodec.decodeCommand("CATCH_ULTIMO   "));
     }
 }

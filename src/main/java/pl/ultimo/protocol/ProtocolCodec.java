@@ -6,7 +6,9 @@ import pl.ultimo.core.model.CardValue;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
@@ -100,6 +102,14 @@ public final class ProtocolCodec {
                 }
                 case "PING" -> new ClientCommand.Ping();
                 case "START" -> new ClientCommand.Start();
+                case "ULTIMO" -> new ClientCommand.Ultimo();
+                case "CATCH_ULTIMO" -> {
+                    if (parts.length < 2) {
+                        throw new ProtocolException("CATCH_ULTIMO requires target username: CATCH_ULTIMO <username>");
+                    }
+                    yield new ClientCommand.CatchUltimo(parts[1]);
+                }
+                case "CHALLENGE_WILD_FOUR" -> new ClientCommand.ChallengeWildFour();
                 default -> throw new ProtocolException("Unknown command: " + commandName);
             };
         } catch (ProtocolException pe) {
@@ -131,6 +141,9 @@ public final class ProtocolCodec {
             case ClientCommand.Chat chat -> "CHAT " + chat.message() + "\n";
             case ClientCommand.Ping ping -> "PING\n";
             case ClientCommand.Start start -> "START\n";
+            case ClientCommand.Ultimo ultimo -> "ULTIMO\n";
+            case ClientCommand.CatchUltimo catchUltimo -> "CATCH_ULTIMO " + catchUltimo.targetUsername() + "\n";
+            case ClientCommand.ChallengeWildFour challenge -> "CHALLENGE_WILD_FOUR\n";
         };
     }
 
@@ -174,6 +187,21 @@ public final class ProtocolCodec {
                     "PONG\n";
             case ServerEvent.ServerShutdown shutdown ->
                     "SERVER_SHUTDOWN " + shutdown.drainSeconds() + "\n";
+            case ServerEvent.UltimoDeclared ultimo ->
+                    "ULTIMO_DECLARED " + ultimo.playerName() + "\n";
+            case ServerEvent.UltimoPenalty penalty ->
+                    "ULTIMO_PENALTY " + penalty.penalizedPlayer() + " " + penalty.challenger() + " " + penalty.penaltyCards() + "\n";
+            case ServerEvent.ChallengeResult res ->
+                    "CHALLENGE_RESULT " + res.challenger() + " " + res.offender() + " " + (res.isGuilty() ? "GUILTY" : "INNOCENT") + " " + res.penalizedPlayer() + " " + res.penaltyCards() + "\n";
+            case ServerEvent.RoundOver roundOver -> {
+                String scoresStr = roundOver.tournamentScores().entrySet().stream()
+                        .sorted(Map.Entry.comparingByKey())
+                        .map(entry -> entry.getKey() + ":" + entry.getValue())
+                        .collect(Collectors.joining(","));
+                if (scoresStr.isEmpty()) scoresStr = "-";
+                yield "ROUND_OVER " + roundOver.roundWinner() + " " + roundOver.pointsEarned() + " "
+                        + (roundOver.isTournamentWon() ? "WON" : "IN_PROGRESS") + " " + scoresStr + "\n";
+            }
         };
     }
 
@@ -271,6 +299,43 @@ public final class ProtocolCodec {
                     } catch (NumberFormatException e) {
                         throw new ProtocolException("Invalid drain timeout in SERVER_SHUTDOWN: " + parts[1]);
                     }
+                }
+                case "ULTIMO_DECLARED" -> {
+                    if (parts.length < 2) {
+                        throw new ProtocolException("Malformed ULTIMO_DECLARED event: " + line);
+                    }
+                    yield new ServerEvent.UltimoDeclared(parts[1]);
+                }
+                case "ULTIMO_PENALTY" -> {
+                    if (parts.length < 4) {
+                        throw new ProtocolException("Malformed ULTIMO_PENALTY event: " + line);
+                    }
+                    yield new ServerEvent.UltimoPenalty(parts[1], parts[2], Integer.parseInt(parts[3]));
+                }
+                case "CHALLENGE_RESULT" -> {
+                    if (parts.length < 6) {
+                        throw new ProtocolException("Malformed CHALLENGE_RESULT event: " + line);
+                    }
+                    boolean isGuilty = "GUILTY".equalsIgnoreCase(parts[3]);
+                    yield new ServerEvent.ChallengeResult(parts[1], parts[2], isGuilty, parts[4], Integer.parseInt(parts[5]));
+                }
+                case "ROUND_OVER" -> {
+                    if (parts.length < 5) {
+                        throw new ProtocolException("Malformed ROUND_OVER event: " + line);
+                    }
+                    String winner = parts[1];
+                    int points = Integer.parseInt(parts[2]);
+                    boolean won = "WON".equalsIgnoreCase(parts[3]);
+                    Map<String, Integer> scores = new LinkedHashMap<>();
+                    if (!"-".equals(parts[4])) {
+                        for (String token : parts[4].split(",")) {
+                            String[] kv = token.split(":");
+                            if (kv.length == 2) {
+                                scores.put(kv[0], Integer.parseInt(kv[1]));
+                            }
+                        }
+                    }
+                    yield new ServerEvent.RoundOver(winner, points, scores, won);
                 }
                 case "PONG" -> new ServerEvent.Pong();
                 default -> throw new ProtocolException("Unknown server event: " + eventName);

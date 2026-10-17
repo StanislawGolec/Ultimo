@@ -349,4 +349,105 @@ class GameRoomTest {
         // Turn automatically advanced to Bob
         assertEquals("Bob", engine.getTurnManager().getCurrentPlayer().getUsername());
     }
+
+    @Test
+    @DisplayName("GameRoom handles ULTIMO declaration and CATCH_ULTIMO penalties over network room")
+    void shouldHandleUltimoAndCatchInGameRoom() throws Exception {
+        GameRoom room = new GameRoom("room-ultimo", 2);
+        executor.submit(room);
+
+        TestClient alice = createTestClient("s-1", "Alice");
+        TestClient bob = createTestClient("s-2", "Bob");
+
+        room.addPlayer(alice.session, "Alice");
+        room.addPlayer(bob.session, "Bob"); // Starts match, Alice's turn
+
+        Thread.sleep(150);
+        alice.drainEvents();
+        bob.drainEvents();
+
+        UltimoEngine engine = room.getEngine();
+        assertNotNull(engine);
+
+        // Set Alice's hand to 2 cards
+        Player pAlice = engine.getTurnManager().getCurrentPlayer();
+        assertEquals("Alice", pAlice.getUsername());
+        pAlice.getHand().clear();
+        Card playCard = new Card(engine.getDiscardPile().getActiveColor(), CardValue.FOUR);
+        Card keepCard = new Card(CardColor.YELLOW, CardValue.SEVEN);
+        pAlice.getHand().addCard(playCard);
+        pAlice.getHand().addCard(keepCard);
+
+        // Alice declares ULTIMO
+        room.enqueueCommand(alice.session, new ClientCommand.Ultimo());
+        Thread.sleep(150);
+        alice.drainEvents();
+        bob.drainEvents();
+
+        boolean gotUltimoEvent = bob.receivedEvents.stream()
+                .anyMatch(e -> e instanceof ServerEvent.UltimoDeclared decl && decl.playerName().equals("Alice"));
+        assertTrue(gotUltimoEvent, "Bob should receive ULTIMO_DECLARED event for Alice");
+
+        // Alice plays card leaving 1 card
+        room.enqueueCommand(alice.session, new ClientCommand.Play(playCard, null));
+        Thread.sleep(150);
+        alice.drainEvents();
+        bob.drainEvents();
+
+        assertEquals(1, pAlice.getHand().size());
+
+        // Bob tries to catch Alice who declared ULTIMO -> should fail with error
+        room.enqueueCommand(bob.session, new ClientCommand.CatchUltimo("Alice"));
+        Thread.sleep(150);
+        bob.drainEvents();
+
+        boolean gotCatchError = bob.receivedEvents.stream()
+                .anyMatch(e -> e instanceof ServerEvent.ErrorEvent err && err.errorMessage().contains("already declared ULTIMO"));
+        assertTrue(gotCatchError, "Bob should receive error that Alice already declared ULTIMO");
+    }
+
+    @Test
+    @DisplayName("GameRoom handles CHALLENGE_WILD_FOUR over network room")
+    void shouldHandleWildFourChallengeInGameRoom() throws Exception {
+        GameRoom room = new GameRoom("room-wild-challenge", 2);
+        executor.submit(room);
+
+        TestClient alice = createTestClient("s-1", "Alice");
+        TestClient bob = createTestClient("s-2", "Bob");
+
+        room.addPlayer(alice.session, "Alice");
+        room.addPlayer(bob.session, "Bob");
+
+        Thread.sleep(150);
+        alice.drainEvents();
+        bob.drainEvents();
+
+        UltimoEngine engine = room.getEngine();
+        assertNotNull(engine);
+
+        // Alice plays Wild Draw Four illegally (holding matching card)
+        Player pAlice = engine.getTurnManager().getCurrentPlayer();
+        pAlice.getHand().clear();
+        Card matching = new Card(engine.getDiscardPile().getActiveColor(), CardValue.ONE);
+        Card wildFour = new Card(CardColor.WILD, CardValue.WILD_DRAW_FOUR);
+        Card other = new Card(CardColor.BLUE, CardValue.NINE);
+        pAlice.getHand().addCard(matching);
+        pAlice.getHand().addCard(wildFour);
+        pAlice.getHand().addCard(other);
+
+        room.enqueueCommand(alice.session, new ClientCommand.Play(wildFour, CardColor.RED));
+        Thread.sleep(150);
+        alice.drainEvents();
+        bob.drainEvents();
+
+        // Bob challenges Alice
+        room.enqueueCommand(bob.session, new ClientCommand.ChallengeWildFour());
+        Thread.sleep(150);
+        alice.drainEvents();
+        bob.drainEvents();
+
+        boolean gotChallengeResult = bob.receivedEvents.stream()
+                .anyMatch(e -> e instanceof ServerEvent.ChallengeResult res && res.isGuilty() && res.penalizedPlayer().equals("Alice") && res.penaltyCards() == 4);
+        assertTrue(gotChallengeResult, "Bob should receive CHALLENGE_RESULT event stating Alice was GUILTY and drew 4 cards");
+    }
 }

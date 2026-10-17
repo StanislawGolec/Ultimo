@@ -152,6 +152,22 @@ public class TerminalClientApp {
                 continue;
             }
 
+            if (input.equalsIgnoreCase("u") || input.equalsIgnoreCase("ultimo")) {
+                sendCommand("ULTIMO");
+                continue;
+            }
+
+            if (input.toLowerCase().startsWith("catch ")) {
+                String target = input.substring(6).trim();
+                sendCommand("CATCH_ULTIMO " + target);
+                continue;
+            }
+
+            if (input.equalsIgnoreCase("challenge") || input.equalsIgnoreCase("ch")) {
+                sendCommand("CHALLENGE_WILD_FOUR");
+                continue;
+            }
+
             if (input.toLowerCase().startsWith("c ") || input.toLowerCase().startsWith("chat ")) {
                 String msg = input.substring(input.indexOf(' ') + 1).trim();
                 sendCommand("CHAT " + msg);
@@ -318,6 +334,27 @@ public class TerminalClientApp {
                 System.out.println("\n[!] OSTRZEŻENIE: Serwer jest wyłączany za " + shutdown.drainSeconds() + " sekund (graceful shutdown)...");
                 isRunning.set(false);
             }
+            case ServerEvent.UltimoDeclared ultimo -> {
+                System.out.println("\n[!] GRACZ " + ultimo.playerName() + " ZGŁOSIŁ ULTIMO! (Pozostała mu 1 karta)");
+            }
+            case ServerEvent.UltimoPenalty penalty -> {
+                System.out.println("\n[!] KARA ULTIMO: " + penalty.penalizedPlayer() + " nie zgłosił ULTIMO i został przyłapany przez "
+                        + penalty.challenger() + "! Dobiera " + penalty.penaltyCards() + " karne karty.");
+            }
+            case ServerEvent.ChallengeResult res -> {
+                System.out.println("\n[!] WYZWANIE WILD DRAW FOUR: " + (res.isGuilty() ? "WINNY (posiadał pasujący kolor)!" : "NIEWINNY!")
+                        + " Gracz " + res.penalizedPlayer() + " dobiera " + res.penaltyCards() + " kart.");
+            }
+            case ServerEvent.RoundOver roundOver -> {
+                System.out.println("\n============================================================");
+                System.out.println("                   *** KONIEC RUNDY ***                     ");
+                System.out.println("  Zwycięzca rundy: " + roundOver.roundWinner() + " (+" + roundOver.pointsEarned() + " pkt)");
+                System.out.println("  Punktacja turnieju (do 500 pkt): " + roundOver.tournamentScores());
+                if (roundOver.isTournamentWon()) {
+                    System.out.println("  *** TURNIEJ ZAKOŃCZONY! Mistrzem zostaje " + roundOver.roundWinner() + "! ***");
+                }
+                System.out.println("============================================================\n");
+            }
             case ServerEvent.Pong ignored -> {}
         }
     }
@@ -350,6 +387,9 @@ public class TerminalClientApp {
         System.out.println("  s, start              - Rozpoczęcie meczu (gdy w pokoju jest min. 2 graczy)");
         System.out.println("  d, draw               - Dobranie 1 karty z talii");
         System.out.println("  p, pass               - Spasowanie tury (dozwolone po dobraniu karty)");
+        System.out.println("  u, ultimo             - Zgłoszenie ULTIMO (gdy masz 1 lub 2 karty przed ruchem)");
+        System.out.println("  catch <gracz>         - Złapanie gracza, który nie powiedział ULTIMO (+2 karty kary)");
+        System.out.println("  challenge, ch         - Wyzwanie legalności zagranej karty Wild Draw Four");
         System.out.println("  c <treść>             - Wysłanie wiadomości na czacie pokojowym");
         System.out.println("  t, table              - Ponowne wyświetlenie stołu i kart");
         System.out.println("  h, help               - Wyświetlenie tej pomocy");
