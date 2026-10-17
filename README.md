@@ -8,14 +8,14 @@
 [![Docker](https://img.shields.io/badge/Docker-Multi--stage%20Alpine-2496ED.svg)](https://www.docker.com/)
 [![License](https://img.shields.io/badge/License-MIT-lightgrey.svg)](LICENSE)
 
-An industrial-grade, authoritative multiplayer card game server (inspired by Uno) engineered with **Java 21**, **Virtual Threads (Project Loom)**, **RFC 6455 WebSockets**, and **raw TCP sockets**. Designed without high-level networking or web framework bloat to demonstrate core computer systems fundamentals, concurrent architectures, clean software craftsmanship, and anti-cheat mechanics.
+An authoritative multiplayer card game server (inspired by Uno) built with **Java 21**, **Virtual Threads (Project Loom)**, **RFC 6455 WebSockets**, and **raw TCP sockets**. Built without external networking or web frameworks to maintain zero runtime dependencies, low memory footprint, and complete control over thread lifecycles and protocol framing.
 
 ---
 
 ## Table of Contents
 
 - [Architectural Highlights](#architectural-highlights)
-- [Why This Design (FAANG / Core Systems Comparison)](#why-this-design-faang--core-systems-comparison)
+- [Design Decisions & Architecture Comparison](#design-decisions--architecture-comparison)
 - [System Architecture](#system-architecture)
   - [1. Component Diagram](#1-component-diagram)
   - [2. Actor Pattern Concurrency Model](#2-actor-pattern-concurrency-model)
@@ -43,29 +43,29 @@ An industrial-grade, authoritative multiplayer card game server (inspired by Uno
 
 ## Architectural Highlights
 
-- **Zero Runtime Frameworks:** Built purely with the standard Java 21 runtime library (`java.net`, `java.util.concurrent`, `java.io`). No Spring, Netty, or Jackson bloat.
-- **Virtual Threads (Project Loom):** Every incoming TCP client connection is handled by a lightweight Virtual Thread (`Executors.newVirtualThreadPerTaskExecutor()`), achieving massive concurrent connection scalability with minimal operating system thread overhead.
+- **Zero Runtime Frameworks:** Built with the standard Java 21 runtime library (`java.net`, `java.util.concurrent`, `java.io`). No external HTTP, serialization, or networking dependencies.
+- **Virtual Threads (Project Loom):** Every incoming TCP client connection is handled by a lightweight Virtual Thread (`Executors.newVirtualThreadPerTaskExecutor()`), achieving high concurrent connection scalability with minimal OS thread overhead.
 - **Actor-Pattern Concurrency:** Rather than wrapping mutable game state with coarse synchronized blocks or lock contention, each active room executes a dedicated single-threaded event loop fed by a thread-safe `LinkedBlockingQueue`. This eliminates race conditions and deadlocks by design.
-- **Authoritative Server with Fog of War:** Complete protection against client-side memory inspection or packet sniffing. The server computes all moves, deck shuffles, and penalties. Opponents' card hands are completely withheld; clients receive only their own hand and table metadata.
+- **Authoritative Server with Fog of War:** Complete protection against client-side tampering or packet inspection. The server computes all moves, deck shuffles, and penalties. Opponents' cards are withheld; clients receive only their own hand and table metadata.
 - **Custom Line-Delimited Protocol:** Clean, stateless, human-readable text protocol (`\n`-terminated), easily debuggable via Telnet, Netcat, or custom bots.
-- **Unified Transport Multiplexer & RFC 6455 WebSockets:** A single TCP port seamlessly multiplexes raw TCP socket connections, RFC 6455 WebSockets, and embedded HTML5 web assets with zero external dependencies.
+- **Unified Transport Multiplexer & RFC 6455 WebSockets:** A single TCP port multiplexes raw TCP socket connections, RFC 6455 WebSockets, and embedded HTML5 web assets with zero external dependencies.
 - **Cloud-Native & Cross-Platform:** Complete containerization via multi-stage Alpine Dockerfile, Generational ZGC optimization (`-XX:+UseZGC -XX:+ZGenerational`), and native cross-platform runner scripts for Windows (`.bat`) and Linux/macOS (`.sh`).
 
 ---
 
-## Why This Design (FAANG / Core Systems Comparison)
+## Design Decisions & Architecture Comparison
 
-Most portfolio projects rely on high-level web frameworks (Spring Boot, Socket.io) that abstract away networking, thread lifecycles, and synchronization. Ultimo was designed specifically to showcase mastery over low-level systems engineering:
+Comparing this implementation approach to conventional framework-based web stacks:
 
-| Dimension | Typical Student Project | **Ultimo Architecture** |
+| Dimension | Conventional Framework Stack (e.g. Spring Boot) | Ultimo Architecture |
 | :--- | :--- | :--- |
-| **Networking** | Spring Boot WebSocket / Socket.io abstraction | **Raw TCP Sockets (`ServerSocket`, `Socket`) + Custom RFC 6455 WebSocket Engine** |
-| **Concurrency** | Heavy OS threads or framework defaults | **Java 21 Virtual Threads (Loom) + Actor Pattern Event Loop** |
-| **State Synchronization** | Coarse `synchronized` blocks or unsafe state access | **Non-blocking Actor Mailbox (`LinkedBlockingQueue`)** |
-| **Security / Anti-Cheat** | State fully sent to client (client can cheat) | **Authoritative State + Fog of War (cards hidden on server)** |
-| **Runtime Overhead** | 300MB+ memory footprint, heavy startup | **Ultra-lightweight (<60MB RSS) with Generational ZGC** |
-| **Wire Protocol** | JSON over HTTP/WebSocket | **High-speed line-delimited ASCII protocol with zero serialization overhead** |
-| **Test Suite** | Untested or simple mocked controller tests | **80 comprehensive unit, concurrency, domain, and E2E integration tests (100% green)** |
+| **Networking** | High-level framework abstraction | Raw TCP sockets (`ServerSocket`, `Socket`) + in-house RFC 6455 WebSocket engine |
+| **Concurrency** | Platform thread pool or reactive callbacks | Java 21 Virtual Threads (Loom) + Actor pattern event loop |
+| **State Synchronization** | Coarse locks or database transactions | Single-writer Actor mailbox (`LinkedBlockingQueue`) per room |
+| **State Authority** | Often delegates validation to client | Authoritative server state with Fog of War (opponent hands masked) |
+| **Runtime Footprint** | 250MB+ RSS baseline memory | Lightweight footprint (<60MB RSS) with Generational ZGC |
+| **Wire Protocol** | Generic JSON serialization | Line-delimited ASCII protocol with zero serialization overhead |
+| **Test Suite** | Mocked controller integration tests | 80+ unit, concurrency, domain, and end-to-end integration tests |
 
 ---
 
