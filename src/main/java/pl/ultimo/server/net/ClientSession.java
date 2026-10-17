@@ -219,7 +219,17 @@ public class ClientSession implements Runnable, Closeable {
             while (!isClosed.get()) {
                 WebSocketFrameCodec.Frame frame;
                 try {
-                    frame = WebSocketFrameCodec.readFrame(rawInputStream);
+                    frame = WebSocketFrameCodec.readFrame(rawInputStream, true);
+                } catch (WebSocketFrameCodec.WebSocketProtocolException wpe) {
+                    MetricsRegistry.getInstance().recordError("WS_PROTOCOL_ERROR");
+                    writeLock.lock();
+                    try {
+                        WebSocketFrameCodec.writeCloseFrame(rawOutputStream, wpe.getStatusCode(), wpe.getMessage());
+                    } catch (IOException ignored) {
+                    } finally {
+                        writeLock.unlock();
+                    }
+                    break;
                 } catch (SocketTimeoutException e) {
                     if (idleTimeoutMillis > 0) {
                         consecutiveTimeouts++;
@@ -241,7 +251,7 @@ public class ClientSession implements Runnable, Closeable {
                     if (frame != null && frame.isClose()) {
                         writeLock.lock();
                         try {
-                            WebSocketFrameCodec.writeCloseFrame(rawOutputStream);
+                            WebSocketFrameCodec.writeCloseFrame(rawOutputStream, frame.closeCode(), "");
                         } finally {
                             writeLock.unlock();
                         }

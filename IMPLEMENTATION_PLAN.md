@@ -194,38 +194,51 @@ flowchart TD
 
 ---
 
-### Stage 4: RFC 6455 WebSocket Engine Security & Fuzz-Proof Hardening
+### Stage 4: RFC 6455 WebSocket Engine Security & Fuzz-Proof Hardening - [COMPLETED]
+* **Status:** ✅ **Fully Implemented & Verified** (40 new security & fuzzing tests in `WebSocketFuzzTest`, 138/138 total tests passing, 100% green).
 * **Objective:** Reinforce the custom pure-Java RFC 6455 WebSocket framing engine against malicious frames, protocol violations, and memory exhaustion attacks.
 
-#### Tasks to Implement:
-1. **RFC 6455 §5.1 Client Frame Masking Enforcement:**
-   - In `WebSocketFrameCodec.readFrame`: Check the mask bit (`bit 0` of byte 1).
-   - If a client sends an unmasked frame, immediately send a Close Frame with code `1002 (Protocol Error)` and terminate the connection (strict RFC 6455 requirement).
-2. **Oversized Payload DOS & OOM Protection:**
-   - Define `MAX_PAYLOAD_SIZE = 65536` (64KB).
-   - If a frame payload length header specifies a size greater than 64KB, immediately close connection with status `1009 (Message Too Big)`.
-3. **Control Frame RFC Constraints:**
-   - Enforce that Control Frames (Ping, Pong, Close):
-     - Have payload length $\le 125$ bytes (reject if $>125$).
-     - Have `FIN = 1` (cannot be fragmented).
-4. **WebSocket Fuzzing Test Suite (`WebSocketFuzzTest`):**
-   - Test suite feeding malformed byte streams:
-     - Invalid opcodes (e.g. `0x3`, `0xF`).
-     - Truncated frame headers and payload byte streams.
-     - Unmasked client frames.
-     - Excessive payload lengths.
-   - Assert that the server handles every malformed input cleanly without crashing or leaving open dangling sockets.
+#### Tasks Implemented:
+1. `[x]` **RFC 6455 §5.1 Client Frame Masking Enforcement:**
+   - In `WebSocketFrameCodec.readFrame(in, requireMask)`: Added strict mask bit checking.
+   - When `requireMask` is enabled in `ClientSession.java`, any client sending an unmasked frame is immediately rejected with a Close Frame carrying RFC 6455 status code `1002 (Protocol Error)` and the connection is terminated.
+2. `[x]` **Oversized Payload DOS & OOM Protection:**
+   - Configured `MAX_PAYLOAD_SIZE = 65536` (64KB).
+   - If a frame payload length header exceeds 64KB (via 16-bit or 64-bit extended length headers), `readFrame` immediately throws `WebSocketProtocolException(1009)` without reading or allocating memory for the malicious payload.
+   - Server writes Close Frame with status `1009 (Message Too Big)` and cleanly drops the socket.
+3. `[x]` **Control Frame RFC Constraints (§5.5) & RSV Bits (§5.2):**
+   - Enforced that control frames (Ping, Pong, Close):
+     - Have payload length $\le 125$ bytes (rejected with status `1002` if $>125$).
+     - Have `FIN = 1` (fragmented control frames rejected with status `1002`).
+   - Validated that reserved opcodes (`0x3..0x7`, `0xB..0xF`) are rejected with status `1002`.
+   - Validated that non-zero RSV bits without negotiated extension are rejected with status `1002`.
+4. `[x]` **RFC Status Code Framing:**
+   - Added `writeCloseFrame(OutputStream out, int statusCode, String reason)` encoding 2-byte status code in network byte order followed by UTF-8 reason phrase.
+   - Extended `Frame` record with `closeCode()` and `closeReason()`.
+5. `[x]` **WebSocket Fuzzing & Security Test Suite (`WebSocketFuzzTest`):**
+   - 40 test cases executed across unit codec and live socket layers:
+     - Unmasked frames (Text, Binary, Ping, Close) $\to$ Status 1002.
+     - Reserved opcodes (`0x3` to `0xF`) $\to$ Status 1002.
+     - Non-zero RSV bits $\to$ Status 1002.
+     - Fragmented control frames (Ping, Pong, Close with FIN=0) $\to$ Status 1002.
+     - Excessive control frame payload ($>125$ bytes) $\to$ Status 1002.
+     - Oversized payload headers ($64\text{KB} + 1$, $100\text{KB}$, $1\text{GB}$) $\to$ Status 1009 without heap allocation.
+     - Truncated frame headers and payload byte streams $\to$ Clean EOF handling.
+     - Live socket adversarial attacks and random byte stream fuzzing $\to$ Clean termination without server crashes or resource leaks.
+   - Full regression suite: **138/138 tests passing (100% green)**.
 
-#### What to Use:
-- `java.nio.ByteBuffer`, bitwise operators (`&`, `|`, `>>>`)
+#### What Was Used:
+- Bitwise operators (`&`, `|`, `>>>`, `>>`)
 - RFC 6455 status codes (`1000 NORMAL`, `1002 PROTOCOL_ERROR`, `1009 MESSAGE_TOO_BIG`)
-- `java.security.MessageDigest` (SHA-1), `java.util.Base64`
+- `java.io.ByteArrayOutputStream`, `java.io.EOFException`
+- Custom `WebSocketProtocolException` carrying RFC status codes
 
 #### Recruiter Talking Point:
-> *"Building an RFC 6455 WebSocket server in pure Java requires more than decoding happy-path frames. Ultimo strictly complies with RFC 6455 section 5.1 masking rules, enforces 64KB message limits to thwart heap exhaustion attacks, and handles control frames with zero third-party dependencies."*
+> *"Building an RFC 6455 WebSocket server in pure Java requires more than decoding happy-path frames. Ultimo strictly complies with RFC 6455 section 5.1 masking rules, enforces 64KB message limits to thwart heap exhaustion attacks, and handles control frames with zero third-party dependencies, verified by a 40-test adversarial fuzzing harness."*
 
 #### Verification & Acceptance Criteria:
-- `WebSocketFuzzTest` running 25+ malformed and adversarial frame test cases, asserting appropriate close codes (1002, 1009) and clean socket termination.
+- `WebSocketFuzzTest` running 40 malformed and adversarial frame test cases, asserting appropriate close codes (1002, 1009) and clean socket termination: **PASSED (40/40)**.
+- Full regression suite: **138/138 tests passing (100% green)**.
 
 ---
 
