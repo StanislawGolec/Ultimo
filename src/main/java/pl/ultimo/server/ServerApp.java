@@ -3,6 +3,7 @@ package pl.ultimo.server;
 import pl.ultimo.protocol.ClientCommand;
 import pl.ultimo.protocol.ServerEvent;
 import pl.ultimo.server.config.ServerConfig;
+import pl.ultimo.server.metrics.MetricsRegistry;
 import pl.ultimo.server.net.ClientSession;
 import pl.ultimo.server.net.ConnectionListener;
 import pl.ultimo.server.net.SocketAcceptor;
@@ -94,14 +95,20 @@ public class ServerApp implements ConnectionListener {
     @Override
     public void onCommandReceived(ClientSession session, ClientCommand command) {
         if (command instanceof ClientCommand.Join join) {
-            if (session.getUsername() != null) {
-                session.sendEvent(new ServerEvent.ErrorEvent("Already joined as " + session.getUsername()));
+            long startNanos = System.nanoTime();
+            try {
+                if (session.getUsername() != null) {
+                    session.sendEvent(new ServerEvent.ErrorEvent("Already joined as " + session.getUsername()));
+                    return;
+                }
+                session.setUsername(join.username());
+                session.sendEvent(new ServerEvent.Welcome(session.getSessionId(), "Welcome to Ultimo, " + join.username() + "!"));
+                roomManager.matchmake(session, join.username());
                 return;
+            } finally {
+                long durationNanos = System.nanoTime() - startNanos;
+                MetricsRegistry.getInstance().recordCommandProcessed("JOIN", durationNanos / 1_000_000_000.0);
             }
-            session.setUsername(join.username());
-            session.sendEvent(new ServerEvent.Welcome(session.getSessionId(), "Welcome to Ultimo, " + join.username() + "!"));
-            roomManager.matchmake(session, join.username());
-            return;
         }
 
         if (session.getUsername() == null) {

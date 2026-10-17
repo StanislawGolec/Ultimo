@@ -4,6 +4,7 @@ import pl.ultimo.protocol.ClientCommand;
 import pl.ultimo.protocol.ProtocolCodec;
 import pl.ultimo.protocol.ProtocolException;
 import pl.ultimo.protocol.ServerEvent;
+import pl.ultimo.server.metrics.MetricsRegistry;
 
 import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
@@ -46,6 +47,8 @@ public class ClientSession implements Runnable, Closeable {
 
         this.rawInputStream = socket.getInputStream();
         this.rawOutputStream = socket.getOutputStream();
+
+        MetricsRegistry.getInstance().recordConnectionOpened(false);
     }
 
     @Override
@@ -98,6 +101,7 @@ public class ClientSession implements Runnable, Closeable {
                 }
 
                 this.isWebSocket = true;
+                MetricsRegistry.getInstance().recordWebSocketUpgrade();
                 runWebSocketLoop();
                 return;
             }
@@ -116,7 +120,10 @@ public class ClientSession implements Runnable, Closeable {
 
         byte[] body;
         String contentType;
-        if (path.equals("/health") || path.equals("/ping")) {
+        if (path.equals("/metrics")) {
+            body = MetricsRegistry.getInstance().toPrometheusText().getBytes(StandardCharsets.UTF_8);
+            contentType = "text/plain; version=0.0.4; charset=utf-8";
+        } else if (path.equals("/health") || path.equals("/ping") || path.equals("/healthz") || path.equals("/ready")) {
             body = "OK".getBytes(StandardCharsets.UTF_8);
             contentType = "text/plain";
         } else {
@@ -212,6 +219,7 @@ public class ClientSession implements Runnable, Closeable {
             ClientCommand command = ProtocolCodec.decodeCommand(line);
             listener.onCommandReceived(this, command);
         } catch (ProtocolException pe) {
+            MetricsRegistry.getInstance().recordError("PROTOCOL_ERROR");
             sendEvent(new ServerEvent.ErrorEvent("Protocol error: " + pe.getMessage()));
         }
     }
@@ -223,6 +231,11 @@ public class ClientSession implements Runnable, Closeable {
     public void sendEvent(ServerEvent event) {
         if (isClosed.get()) {
             return;
+        }
+
+        MetricsRegistry.getInstance().recordEventEmitted(event.type().name());
+        if (event instanceof ServerEvent.ErrorEvent) {
+            MetricsRegistry.getInstance().recordError("ERROR_EVENT");
         }
 
         synchronized (writeLock) {
@@ -288,6 +301,7 @@ public class ClientSession implements Runnable, Closeable {
     @Override
     public void close() {
         if (isClosed.compareAndSet(false, true)) {
+            MetricsRegistry.getInstance().recordConnectionClosed(isWebSocket);
             try {
                 socket.close();
             } catch (IOException ignored) {

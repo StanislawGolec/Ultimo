@@ -1,6 +1,7 @@
 package pl.ultimo.server.room;
 
 import pl.ultimo.server.config.ServerConfig;
+import pl.ultimo.server.metrics.MetricsRegistry;
 import pl.ultimo.server.net.ClientSession;
 
 import java.util.Map;
@@ -24,6 +25,7 @@ public class RoomManager {
 
     public RoomManager(ServerConfig config) {
         this.config = config;
+        MetricsRegistry.getInstance().setActiveRoomsSupplier(this::getActiveRoomCount);
     }
 
     /**

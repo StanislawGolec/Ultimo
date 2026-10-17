@@ -7,6 +7,7 @@ import pl.ultimo.core.model.Player;
 import pl.ultimo.core.state.GameState;
 import pl.ultimo.protocol.ClientCommand;
 import pl.ultimo.protocol.ServerEvent;
+import pl.ultimo.server.metrics.MetricsRegistry;
 import pl.ultimo.server.net.ClientSession;
 
 import java.util.ArrayList;
@@ -128,16 +129,22 @@ public class GameRoom implements Runnable {
     }
 
     private void processCommand(ClientSession session, ClientCommand command) {
-        Player player = sessionPlayerMap.get(session.getSessionId());
+        long startNanos = System.nanoTime();
+        try {
+            Player player = sessionPlayerMap.get(session.getSessionId());
 
-        switch (command) {
-            case ClientCommand.Start start -> handleStart(session);
-            case ClientCommand.Play play -> handlePlay(session, player, play);
-            case ClientCommand.Draw draw -> handleDraw(session, player);
-            case ClientCommand.Pass pass -> handlePass(session, player);
-            case ClientCommand.Chat chat -> handleChat(session, chat);
-            case ClientCommand.Ping ping -> session.sendEvent(new ServerEvent.Pong());
-            default -> session.sendEvent(new ServerEvent.ErrorEvent("Unsupported command in room: " + command.type()));
+            switch (command) {
+                case ClientCommand.Start start -> handleStart(session);
+                case ClientCommand.Play play -> handlePlay(session, player, play);
+                case ClientCommand.Draw draw -> handleDraw(session, player);
+                case ClientCommand.Pass pass -> handlePass(session, player);
+                case ClientCommand.Chat chat -> handleChat(session, chat);
+                case ClientCommand.Ping ping -> session.sendEvent(new ServerEvent.Pong());
+                default -> session.sendEvent(new ServerEvent.ErrorEvent("Unsupported command in room: " + command.type()));
+            }
+        } finally {
+            long durationNanos = System.nanoTime() - startNanos;
+            MetricsRegistry.getInstance().recordCommandProcessed(command.type().name(), durationNanos / 1_000_000_000.0);
         }
     }
 
