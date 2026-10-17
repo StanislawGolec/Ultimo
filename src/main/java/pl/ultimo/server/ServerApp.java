@@ -1,6 +1,7 @@
 package pl.ultimo.server;
 
 import pl.ultimo.protocol.ClientCommand;
+import pl.ultimo.protocol.ProtocolCodec;
 import pl.ultimo.protocol.ServerEvent;
 import pl.ultimo.server.config.ServerConfig;
 import pl.ultimo.server.metrics.MetricsRegistry;
@@ -68,6 +69,12 @@ public class ServerApp implements ConnectionListener {
     }
 
     public void start() {
+        // Warm up protocol codecs on platform thread to initialize dynamic switch bootstrap tables
+        try {
+            ProtocolCodec.encodeEvent(new ServerEvent.Pong());
+            ProtocolCodec.decodeCommand("PING");
+        } catch (Exception ignored) {}
+
         System.out.println("Starting Ultimo Server on port " + config.port() + "...");
         this.acceptor = new SocketAcceptor(config, this::handleNewConnection);
         this.acceptorThread = Thread.ofPlatform().name("socket-acceptor").start(acceptor);

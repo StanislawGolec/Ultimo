@@ -1,0 +1,83 @@
+name: Ultimo CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Build & Verify (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, windows-latest ]
+        java: [ '21' ]
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21 (Eclipse Temurin)
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ matrix.java }}
+          distribution: 'temurin'
+          cache: 'maven'
+
+      - name: Compile and Run Test Suite with Loom Carrier Pinning Detection
+        run: mvn clean test -B -DargLine="-Djdk.tracePinnedThreads=full"
+
+      - name: Package Standalone Server Artifact
+        run: mvn package -B -DskipTests
+
+      - name: Upload Server JAR Artifact
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ultimo-server-jar
+          path: target/ultimo-server.jar
+          retention-days: 7
+
+  docker-and-cloudrun:
+    name: Docker Alpine Image & Container Health Probes
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Multi-Stage Alpine Container Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          load: true
+          tags: ultimo-server:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Test Container Liveness & Readiness Probes
+        run: |
+          docker run -d --name ultimo-probe-test -p 8080:8080 ultimo-server:test
+          sleep 5
+          docker ps
+          
+          # Verify HTTP Probes
+          curl -sSf http://127.0.0.1:8080/health || (docker logs ultimo-probe-test && exit 1)
+          curl -sSf http://127.0.0.1:8080/healthz || exit 1
+          curl -sSf http://127.0.0.1:8080/ready || exit 1
+          curl -sSf http://127.0.0.1:8080/metrics | grep "ultimo_connections_total" || exit 1
+          
+          docker stop ultimo-probe-test
+          docker rm ultimo-probe-test
+
+      - name: Validate Cloud Run Deployment Script
+        run: |
+          chmod +x cloudrun-deploy.sh
+          bash -n cloudrun-deploy.sh

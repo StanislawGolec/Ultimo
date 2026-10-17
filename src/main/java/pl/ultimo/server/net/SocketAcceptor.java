@@ -27,10 +27,12 @@ public class SocketAcceptor implements Runnable, Closeable {
         this.connectionHandler = Objects.requireNonNull(connectionHandler, "connectionHandler must not be null");
     }
 
+    public static final int TCP_BACKLOG = 2048;
+
     @Override
     public void run() {
         try {
-            serverSocket = new ServerSocket(config.port());
+            serverSocket = new ServerSocket(config.port(), TCP_BACKLOG);
             isRunning.set(true);
 
             while (isRunning.get()) {
