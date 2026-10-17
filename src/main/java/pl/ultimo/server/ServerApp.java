@@ -210,7 +210,11 @@ public class ServerApp implements ConnectionListener {
                 }
                 session.setUsername(join.username());
                 session.sendEvent(new ServerEvent.Welcome(session.getSessionId(), "Welcome to Ultimo, " + join.username() + "!"));
-                roomManager.matchmake(session, join.username());
+                if (join.roomId() != null && !join.roomId().isBlank()) {
+                    roomManager.joinRoom(session, join.username(), join.roomId());
+                } else {
+                    roomManager.matchmake(session, join.username());
+                }
                 return;
             } finally {
                 long durationNanos = System.nanoTime() - startNanos;

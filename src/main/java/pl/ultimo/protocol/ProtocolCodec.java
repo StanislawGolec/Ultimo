@@ -43,13 +43,24 @@ public final class ProtocolCodec {
             return switch (commandName) {
                 case "JOIN" -> {
                     if (parts.length < 2) {
-                        throw new ProtocolException("JOIN command requires a username: JOIN <username>");
+                        throw new ProtocolException("JOIN command requires a username: JOIN <username> [room_id]");
                     }
-                    String username = line.substring(line.indexOf(' ') + 1).trim();
-                    if (username.isEmpty()) {
-                        throw new ProtocolException("Username cannot be empty");
+                    if (parts.length == 2) {
+                        yield new ClientCommand.Join(parts[1], null);
                     }
-                    yield new ClientCommand.Join(username);
+                    if (parts.length == 3) {
+                        yield new ClientCommand.Join(parts[1], parts[2]);
+                    }
+                    String lastToken = parts[parts.length - 1];
+                    if (lastToken.toLowerCase().startsWith("room") || lastToken.toLowerCase().startsWith("r-")
+                            || lastToken.contains("_") || lastToken.contains("-")) {
+                        int end = line.lastIndexOf(lastToken);
+                        String username = line.substring(line.indexOf(' ') + 1, end).trim();
+                        yield new ClientCommand.Join(username, lastToken);
+                    } else {
+                        String username = line.substring(line.indexOf(' ') + 1).trim();
+                        yield new ClientCommand.Join(username, null);
+                    }
                 }
                 case "PLAY" -> {
                     if (parts.length < 2) {
@@ -125,7 +136,13 @@ public final class ProtocolCodec {
     public static String encodeCommand(ClientCommand command) {
         Objects.requireNonNull(command, "command must not be null");
         return switch (command) {
-            case ClientCommand.Join join -> "JOIN " + join.username() + "\n";
+            case ClientCommand.Join join -> {
+                if (join.roomId() != null && !join.roomId().isBlank()) {
+                    yield "JOIN " + join.username() + " " + join.roomId() + "\n";
+                } else {
+                    yield "JOIN " + join.username() + "\n";
+                }
+            }
             case ClientCommand.Play play -> {
                 String cardsStr = play.cards().stream()
                         .map(ProtocolCodec::formatCard)
@@ -350,13 +367,42 @@ public final class ProtocolCodec {
     /**
      * Formats a card instance into wire representation.
      */
+    /**
+     * Formats a card instance into wire representation.
+     */
     public static String formatCard(Card card) {
+        return formatCard(card, false);
+    }
+
+    /**
+     * Formats a card instance into wire representation, with optional abbreviation.
+     */
+    public static String formatCard(Card card, boolean abbreviated) {
         Objects.requireNonNull(card, "card must not be null");
         if (card.value() == CardValue.WILD) {
             return "WILD";
         }
         if (card.value() == CardValue.WILD_DRAW_FOUR) {
-            return "WILD_DRAW_FOUR";
+            return abbreviated ? "WILD_DRAW4" : "WILD_DRAW_FOUR";
+        }
+        if (abbreviated) {
+            String val = switch (card.value()) {
+                case ZERO -> "0";
+                case ONE -> "1";
+                case TWO -> "2";
+                case THREE -> "3";
+                case FOUR -> "4";
+                case FIVE -> "5";
+                case SIX -> "6";
+                case SEVEN -> "7";
+                case EIGHT -> "8";
+                case NINE -> "9";
+                case DRAW_TWO -> "DRAW2";
+                case SKIP -> "SKIP";
+                case REVERSE -> "REV";
+                default -> card.value().name();
+            };
+            return card.color().name() + "_" + val;
         }
         return card.color().name() + "_" + card.value().name();
     }
@@ -364,9 +410,9 @@ public final class ProtocolCodec {
     /**
      * Parses a card token from wire representation into a Card instance.
      * Supports formats like:
-     * - "WILD", "WILD_DRAW_FOUR"
+     * - "WILD", "WILD_DRAW_FOUR", "WILD_FOUR", "WILD_COLOR", "WILD_DRAW4"
      * - "RED_FIVE", "BLUE_SKIP", "YELLOW_DRAW_TWO"
-     * - "RED_5", "BLUE_0", "GREEN_DRAW2"
+     * - "RED_5", "BLUE_0", "GREEN_DRAW2", "YELLOW_REV"
      */
     public static Card parseCard(String token) throws ProtocolException {
         if (token == null || token.isBlank()) {
@@ -375,10 +421,11 @@ public final class ProtocolCodec {
 
         String normalized = token.trim().toUpperCase();
 
-        if ("WILD".equals(normalized) || "WILD_WILD".equals(normalized)) {
+        if ("WILD".equals(normalized) || "WILD_WILD".equals(normalized) || "WILD_COLOR".equals(normalized)) {
             return new Card(CardColor.WILD, CardValue.WILD);
         }
-        if ("WILD_DRAW_FOUR".equals(normalized) || "WILD_DRAW4".equals(normalized) || "WILD_WILD_DRAW_FOUR".equals(normalized)) {
+        if ("WILD_DRAW_FOUR".equals(normalized) || "WILD_DRAW4".equals(normalized) || "WILD_FOUR".equals(normalized)
+                || "WILD_WILD_DRAW_FOUR".equals(normalized) || "WD4".equals(normalized)) {
             return new Card(CardColor.WILD, CardValue.WILD_DRAW_FOUR);
         }
 
@@ -418,10 +465,10 @@ public final class ProtocolCodec {
             case "8", "EIGHT" -> CardValue.EIGHT;
             case "9", "NINE" -> CardValue.NINE;
             case "SKIP" -> CardValue.SKIP;
-            case "REVERSE" -> CardValue.REVERSE;
-            case "DRAW_TWO", "DRAW2", "DRAW_2" -> CardValue.DRAW_TWO;
-            case "WILD" -> CardValue.WILD;
-            case "WILD_DRAW_FOUR", "WILD_DRAW4" -> CardValue.WILD_DRAW_FOUR;
+            case "REVERSE", "REV" -> CardValue.REVERSE;
+            case "DRAW_TWO", "DRAW2", "DRAW_2", "D2" -> CardValue.DRAW_TWO;
+            case "WILD", "COLOR" -> CardValue.WILD;
+            case "WILD_DRAW_FOUR", "WILD_DRAW4", "WILD_FOUR", "WD4" -> CardValue.WILD_DRAW_FOUR;
             default -> throw new ProtocolException("Unknown card value: " + token);
         };
     }

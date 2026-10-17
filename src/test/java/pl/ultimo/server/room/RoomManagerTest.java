@@ -110,4 +110,34 @@ class RoomManagerTest {
         assertTrue(roomManager.getRoomForSession("s-1").isEmpty());
         assertEquals(0, roomManager.getActiveRoomCount(), "Room should be removed when empty");
     }
+
+    @Test
+    @DisplayName("Targeted room joining places players into specifically requested room")
+    void targetedRoomJoiningPlacesPlayersInRequestedRoom() throws Exception {
+        ClientSession alice = createDummySession("s-1", "Alice");
+        ClientSession bob = createDummySession("s-2", "Bob");
+
+        GameRoom r1 = roomManager.joinRoom(alice, "Alice", "custom-room-99");
+        GameRoom r2 = roomManager.joinRoom(bob, "Bob", "custom-room-99");
+
+        assertSame(r1, r2);
+        assertEquals("custom-room-99", r1.getRoomId());
+        assertEquals(2, r1.getPlayerCount());
+    }
+
+    @Test
+    @DisplayName("Targeted room joining rejects player when requested room is full")
+    void targetedRoomJoiningRejectsWhenFull() throws Exception {
+        ClientSession alice = createDummySession("s-1", "Alice");
+        ClientSession bob = createDummySession("s-2", "Bob");
+        ClientSession charlie = createDummySession("s-3", "Charlie");
+
+        roomManager.joinRoom(alice, "Alice", "full-room-1");
+        roomManager.joinRoom(bob, "Bob", "full-room-1");
+
+        // Charlie tries to join full room (capacity 2)
+        GameRoom r3 = roomManager.joinRoom(charlie, "Charlie", "full-room-1");
+        assertEquals(2, r3.getPlayerCount());
+        assertTrue(roomManager.getRoomForSession("s-3").isEmpty(), "Charlie should not be registered in sessionRoomMap");
+    }
 }

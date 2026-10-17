@@ -251,4 +251,48 @@ class ProtocolCodecTest {
         assertThrows(ProtocolException.class, () -> ProtocolCodec.decodeCommand("CATCH_ULTIMO"));
         assertThrows(ProtocolException.class, () -> ProtocolCodec.decodeCommand("CATCH_ULTIMO   "));
     }
+
+    @Test
+    @DisplayName("Should decode and encode JOIN command with optional room_id")
+    void shouldDecodeAndEncodeJoinWithRoomId() throws ProtocolException {
+        ClientCommand cmd = ProtocolCodec.decodeCommand("JOIN Bob room_42");
+        assertInstanceOf(ClientCommand.Join.class, cmd);
+        ClientCommand.Join join = (ClientCommand.Join) cmd;
+        assertEquals("Bob", join.username());
+        assertEquals("room_42", join.roomId());
+
+        assertEquals("JOIN Bob room_42\n", ProtocolCodec.encodeCommand(join));
+        assertEquals("JOIN Alice\n", ProtocolCodec.encodeCommand(new ClientCommand.Join("Alice")));
+    }
+
+    @Test
+    @DisplayName("Should parse synonyms and abbreviated card tokens symmetrically")
+    void shouldParseSynonymsAndAbbreviatedCardTokens() throws ProtocolException {
+        assertEquals(new Card(CardColor.WILD, CardValue.WILD), ProtocolCodec.parseCard("WILD_COLOR"));
+        assertEquals(new Card(CardColor.WILD, CardValue.WILD_DRAW_FOUR), ProtocolCodec.parseCard("WILD_FOUR"));
+        assertEquals(new Card(CardColor.WILD, CardValue.WILD_DRAW_FOUR), ProtocolCodec.parseCard("WILD_DRAW4"));
+        assertEquals(new Card(CardColor.WILD, CardValue.WILD_DRAW_FOUR), ProtocolCodec.parseCard("WD4"));
+
+        assertEquals(new Card(CardColor.RED, CardValue.REVERSE), ProtocolCodec.parseCard("RED_REV"));
+        assertEquals(new Card(CardColor.BLUE, CardValue.DRAW_TWO), ProtocolCodec.parseCard("BLUE_D2"));
+        assertEquals(new Card(CardColor.GREEN, CardValue.DRAW_TWO), ProtocolCodec.parseCard("GREEN_DRAW2"));
+        assertEquals(new Card(CardColor.YELLOW, CardValue.SEVEN), ProtocolCodec.parseCard("YELLOW_7"));
+
+        assertEquals("RED_REV", ProtocolCodec.formatCard(new Card(CardColor.RED, CardValue.REVERSE), true));
+        assertEquals("BLUE_DRAW2", ProtocolCodec.formatCard(new Card(CardColor.BLUE, CardValue.DRAW_TWO), true));
+        assertEquals("WILD_DRAW4", ProtocolCodec.formatCard(new Card(CardColor.WILD, CardValue.WILD_DRAW_FOUR), true));
+        assertEquals("GREEN_7", ProtocolCodec.formatCard(new Card(CardColor.GREEN, CardValue.SEVEN), true));
+    }
+
+    @Test
+    @DisplayName("Should tolerate optional metadata tokens in TURN_ANNOUNCED and DRAW_RESULT")
+    void shouldTolerateOptionalTokensInServerEvents() throws ProtocolException {
+        ServerEvent turn = ProtocolCodec.decodeEvent("TURN_ANNOUNCED Alice 25000\n");
+        assertInstanceOf(ServerEvent.TurnAnnounced.class, turn);
+        assertEquals("Alice", ((ServerEvent.TurnAnnounced) turn).activePlayerName());
+
+        ServerEvent draw = ProtocolCodec.decodeEvent("DRAW_RESULT YELLOW_DRAW2 true\n");
+        assertInstanceOf(ServerEvent.DrawResult.class, draw);
+        assertEquals(new Card(CardColor.YELLOW, CardValue.DRAW_TWO), ((ServerEvent.DrawResult) draw).drawnCard());
+    }
 }

@@ -66,11 +66,50 @@ public class RoomManager {
         }
     }
 
+    /**
+     * Enrolls player in a targeted room by ID, creating the room if it doesn't already exist.
+     */
+    public GameRoom joinRoom(ClientSession session, String username, String roomId) {
+        if (roomId == null || roomId.isBlank()) {
+            return matchmake(session, username);
+        }
+
+        matchmakeLock.lock();
+        try {
+            GameRoom room = activeRooms.get(roomId);
+            if (room == null) {
+                room = new GameRoom(roomId, config.defaultRoomCapacity());
+                activeRooms.put(roomId, room);
+                roomExecutor.submit(room);
+            }
+
+            if (room.isFull()) {
+                session.sendEvent(new pl.ultimo.protocol.ServerEvent.ErrorEvent("Targeted room " + roomId + " is full"));
+                return room;
+            }
+
+            boolean added = room.addPlayer(session, username);
+            if (added) {
+                sessionRoomMap.put(session.getSessionId(), room);
+            }
+            return room;
+        } finally {
+            matchmakeLock.unlock();
+        }
+    }
+
     public Optional<GameRoom> getRoomForSession(String sessionId) {
         if (sessionId == null) {
             return Optional.empty();
         }
         return Optional.ofNullable(sessionRoomMap.get(sessionId));
+    }
+
+    public Optional<GameRoom> getRoom(String roomId) {
+        if (roomId == null) {
+            return Optional.empty();
+        }
+        return Optional.ofNullable(activeRooms.get(roomId));
     }
 
     /**
