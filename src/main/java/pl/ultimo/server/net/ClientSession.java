@@ -62,6 +62,11 @@ public class ClientSession implements Runnable, Closeable {
             if (firstLine.startsWith("GET ")) {
                 handleHttpOrWebSocket(firstLine);
             } else {
+                if (!listener.isServerReady()) {
+                    sendEvent(new ServerEvent.ErrorEvent("Server is shutting down"));
+                    close();
+                    return;
+                }
                 handleTcpConnection(firstLine);
             }
         } catch (IOException e) {
@@ -120,18 +125,31 @@ public class ClientSession implements Runnable, Closeable {
 
         byte[] body;
         String contentType;
+        int statusCode = 200;
+        String statusText = "OK";
+
         if (path.equals("/metrics")) {
             body = MetricsRegistry.getInstance().toPrometheusText().getBytes(StandardCharsets.UTF_8);
             contentType = "text/plain; version=0.0.4; charset=utf-8";
-        } else if (path.equals("/health") || path.equals("/ping") || path.equals("/healthz") || path.equals("/ready")) {
+        } else if (path.equals("/health") || path.equals("/ping") || path.equals("/healthz")) {
             body = "OK".getBytes(StandardCharsets.UTF_8);
             contentType = "text/plain";
+        } else if (path.equals("/ready")) {
+            if (listener.isServerReady()) {
+                body = "OK".getBytes(StandardCharsets.UTF_8);
+                contentType = "text/plain";
+            } else {
+                body = "Service Unavailable".getBytes(StandardCharsets.UTF_8);
+                contentType = "text/plain";
+                statusCode = 503;
+                statusText = "Service Unavailable";
+            }
         } else {
             body = WebClientAssets.getHtmlPage().getBytes(StandardCharsets.UTF_8);
             contentType = "text/html; charset=UTF-8";
         }
 
-        String responseHeader = "HTTP/1.1 200 OK\r\n"
+        String responseHeader = "HTTP/1.1 " + statusCode + " " + statusText + "\r\n"
                 + "Content-Type: " + contentType + "\r\n"
                 + "Content-Length: " + body.length + "\r\n"
                 + "Connection: close\r\n\r\n";

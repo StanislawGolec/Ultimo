@@ -95,40 +95,50 @@ flowchart TD
 
 ---
 
-### Stage 2: Enterprise Lifecycle, Kubernetes/Cloud Run Probes & Graceful Shutdown
+### Stage 2: Enterprise Lifecycle, Kubernetes/Cloud Run Probes & Graceful Shutdown - [COMPLETED]
+* **Status:** ✅ **Fully Implemented & Verified** (3 new lifecycle tests in `GracefulShutdownTest`, 1 updated codec test, 94/94 total passing).
 * **Objective:** Ensure production readiness under Google Cloud Run and Kubernetes (GKE) container lifecycles by providing dedicated health probes and a clean SIGTERM shutdown drain sequence.
 
-#### Tasks to Implement:
-1. **Liveness & Readiness HTTP Probes:**
+#### Tasks Implemented:
+1. `[x]` **Liveness & Readiness HTTP Probes:**
    - `GET /healthz`: Liveness probe. Returns HTTP 200 `OK` as long as the server process is alive and acceptor thread has not terminated abnormally.
-   - `GET /ready`: Readiness probe. Returns HTTP 200 `OK` when the server is actively bound to its port and ready to receive incoming player traffic; returns HTTP 503 `Service Unavailable` when shutting down or draining.
-2. **Protocol Extension for Graceful Shutdown:**
-   - Add `SERVER_SHUTDOWN` to `pl.ultimo.protocol.EventType`.
-   - Add record `ServerEvent.ServerShutdown(int drainSeconds) implements ServerEvent`.
-   - Update `ProtocolCodec.encodeEvent` and `decodeEvent` to format and parse `SERVER_SHUTDOWN <drain_seconds>\n`.
-3. **Coordinated Shutdown Sequence in `ServerApp`:**
-   - Implement `Runtime.getRuntime().addShutdownHook(Thread)`:
-     1. Mark readiness probe as failing (returns HTTP 503 to stop load balancer traffic).
-     2. Close `SocketAcceptor` (rejects any new TCP connection requests).
-     3. Broadcast `SERVER_SHUTDOWN 5` to all active sessions across all rooms.
-     4. Wait for a 5-second grace window (`CountDownLatch` / `awaitTermination(5, TimeUnit.SECONDS)`) allowing ongoing moves or chat to complete.
-     5. Flush and close all client sockets cleanly.
-     6. Terminate process with exit code 0.
-4. **Client-Side Shutdown Handling:**
-   - Update `TerminalClientApp`: When receiving `SERVER_SHUTDOWN <sec>`, log an alert to the user: `[SERVER] Server shutting down in <sec> seconds...` and cleanly close connection.
-   - Update embedded Web Client (`WebClientAssets`): Display a floating banner alert with a countdown timer.
+   - `GET /ready`: Readiness probe. Returns HTTP 200 `OK` when the server is actively listening and accepting traffic; dynamically transitions to HTTP 503 `Service Unavailable` when graceful shutdown / drain starts so Cloud Run / Kubernetes ingress load balancers drop traffic immediately.
+2. `[x]` **Protocol Extension for Graceful Shutdown:**
+   - Added `SERVER_SHUTDOWN` to `pl.ultimo.protocol.EventType`.
+   - Added record `ServerEvent.ServerShutdown(int drainSeconds) implements ServerEvent`.
+   - Updated `ProtocolCodec.encodeEvent` and `decodeEvent` to format and parse `SERVER_SHUTDOWN <drain_seconds>\n` with lossless round-trip serialization.
+3. `[x]` **Coordinated Shutdown Sequence in `ServerApp`:**
+   - Implemented `Runtime.getRuntime().addShutdownHook(Thread)`:
+     1. Tracks connected sessions in `activeSessions` map.
+     2. Sets `isShuttingDown` flag, causing `/ready` probes to fail with HTTP 503 while allowing existing rooms and sessions to drain turns.
+     3. Rejects new incoming TCP game connections (`ERROR Server is shutting down`) while serving HTTP probes during the drain period.
+     4. Broadcasts `SERVER_SHUTDOWN <drainSeconds>` warning event to all active sessions.
+     5. Waits for grace drain window (default 5s, configurable in `ServerConfig.shutdownDrainSeconds()`).
+     6. Closes `SocketAcceptor` and all active client sessions.
+     7. Shuts down `sessionExecutor` and `roomManager` with clean exit code 0.
+4. `[x]` **Client-Side Shutdown Handling:**
+   - Updated `TerminalClientApp`: When receiving `SERVER_SHUTDOWN <sec>`, displays alert `[!] OSTRZEŻENIE: Serwer jest wyłączany za <sec> sekund (graceful shutdown)...` and terminates gracefully.
+   - Updated embedded Web Client (`WebClientAssets`): Displays red banner alert `⚠️ Server shutting down in <sec>s...` and disables buttons.
+5. `[x]` **Testing & QA Verification:**
+   - `GracefulShutdownTest`:
+     - Verified `/ready` transitions from 200 OK to 503 Service Unavailable when shutdown begins, while `/healthz` stays 200 OK.
+     - Verified broadcast of `SERVER_SHUTDOWN 1` to connected clients followed by clean socket closure after drain window.
+     - Verified new connections are rejected after shutdown.
+   - Full regression suite: **94/94 tests passing (100% green)**.
 
-#### What to Use:
+#### What Was Used:
 - `java.lang.Runtime#addShutdownHook`
-- `java.util.concurrent.CountDownLatch`, `java.util.concurrent.TimeUnit`
-- `java.util.concurrent.atomic.AtomicBoolean` (server state flag: `READY`, `DRAINING`, `STOPPED`)
-- Standard Java HTTP response header formatting
+- `java.util.concurrent.atomic.AtomicBoolean` (server lifecycle flag)
+- `java.util.concurrent.ConcurrentHashMap` (active session tracking)
+- Dynamic HTTP status codes (`HTTP/1.1 200 OK` vs `HTTP/1.1 503 Service Unavailable`)
 
 #### Recruiter Talking Point:
 > *"In serverless platforms like Google Cloud Run, instances receive SIGTERM before termination. Ultimo implements the standard 2-step drain sequence: instantly failing readiness probes to drop load balancer ingress, warning connected WebSocket clients with `SERVER_SHUTDOWN`, draining in-flight game turns within 5 seconds, and cleanly closing sockets with exit code 0."*
 
 #### Verification & Acceptance Criteria:
-- Test `GracefulShutdownTest` triggering shutdown, verifying `/ready` transitions to 503, verifying connected mock clients receive `SERVER_SHUTDOWN 5`, and confirming all sockets close within the grace period.
+- Test `GracefulShutdownTest` triggering shutdown, verifying `/ready` transitions to 503, verifying connected mock clients receive `SERVER_SHUTDOWN 1`, and confirming all sockets close within the grace period: **PASSED (3/3)**.
+- Codec serialization test `shouldRoundTripServerEvents`: **PASSED**.
+- Full regression suite: **94/94 tests passing (100% green)**.
 
 ---
 

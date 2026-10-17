@@ -172,6 +172,8 @@ public final class ProtocolCodec {
                     "GAME_OVER " + gameOver.winnerName() + "\n";
             case ServerEvent.Pong pong ->
                     "PONG\n";
+            case ServerEvent.ServerShutdown shutdown ->
+                    "SERVER_SHUTDOWN " + shutdown.drainSeconds() + "\n";
         };
     }
 
@@ -259,6 +261,16 @@ public final class ProtocolCodec {
                         throw new ProtocolException("Malformed GAME_OVER event: " + line);
                     }
                     yield new ServerEvent.GameOver(parts[1]);
+                }
+                case "SERVER_SHUTDOWN" -> {
+                    if (parts.length < 2) {
+                        throw new ProtocolException("Malformed SERVER_SHUTDOWN event: " + line);
+                    }
+                    try {
+                        yield new ServerEvent.ServerShutdown(Integer.parseInt(parts[1]));
+                    } catch (NumberFormatException e) {
+                        throw new ProtocolException("Invalid drain timeout in SERVER_SHUTDOWN: " + parts[1]);
+                    }
                 }
                 case "PONG" -> new ServerEvent.Pong();
                 default -> throw new ProtocolException("Unknown server event: " + eventName);

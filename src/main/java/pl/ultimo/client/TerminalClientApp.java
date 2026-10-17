@@ -314,6 +314,10 @@ public class TerminalClientApp {
                 System.out.println("  Zwycięzca: " + gameOver.winnerName());
                 System.out.println("============================================================\n");
             }
+            case ServerEvent.ServerShutdown shutdown -> {
+                System.out.println("\n[!] OSTRZEŻENIE: Serwer jest wyłączany za " + shutdown.drainSeconds() + " sekund (graceful shutdown)...");
+                isRunning.set(false);
+            }
             case ServerEvent.Pong ignored -> {}
         }
     }

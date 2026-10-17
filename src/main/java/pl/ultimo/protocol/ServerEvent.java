@@ -88,4 +88,11 @@ public sealed interface ServerEvent {
             return EventType.PONG;
         }
     }
+
+    record ServerShutdown(int drainSeconds) implements ServerEvent {
+        @Override
+        public EventType type() {
+            return EventType.SERVER_SHUTDOWN;
+        }
+    }
 }

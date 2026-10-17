@@ -10,4 +10,12 @@ public interface ConnectionListener {
     void onCommandReceived(ClientSession session, ClientCommand command);
 
     void onSessionDisconnected(ClientSession session);
+
+    /**
+     * Indicates whether the server is actively accepting connections and ready for traffic.
+     * When false (e.g. during graceful drain), readiness probes (/ready) return 503.
+     */
+    default boolean isServerReady() {
+        return true;
+    }
 }

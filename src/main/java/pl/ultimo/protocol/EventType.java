@@ -14,5 +14,6 @@ public enum EventType {
     ERROR,
     CHAT_BROADCAST,
     GAME_OVER,
-    PONG;
+    PONG,
+    SERVER_SHUTDOWN;
 }

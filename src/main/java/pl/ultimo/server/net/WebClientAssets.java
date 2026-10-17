@@ -435,6 +435,19 @@ public final class WebClientAssets {
           logMessage(`Error: ${parts.slice(1).join(' ')}`, 'error');
           break;
         }
+
+        case 'SERVER_SHUTDOWN': {
+          const drainSec = parts[1] || '5';
+          logMessage(`⚠️ SERVER SHUTDOWN: Server is shutting down in ${drainSec}s (graceful drain)!`, 'error');
+          turnBanner.className = 'turn-banner';
+          turnBanner.style.borderColor = '#ef4444';
+          turnBanner.style.color = '#ef4444';
+          turnBanner.textContent = `⚠️ Server shutting down in ${drainSec}s...`;
+          drawBtn.disabled = true;
+          passBtn.disabled = true;
+          startBtn.style.display = 'none';
+          break;
+        }
       }
     }
 

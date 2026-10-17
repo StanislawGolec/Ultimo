@@ -133,6 +133,7 @@ class ProtocolCodecTest {
         assertEquals("OPPONENT_UPDATE Bob 4\n", ProtocolCodec.encodeEvent(new ServerEvent.OpponentUpdate("Bob", 4)));
         assertEquals("ERROR Bad move\n", ProtocolCodec.encodeEvent(new ServerEvent.ErrorEvent("Bad move")));
         assertEquals("PONG\n", ProtocolCodec.encodeEvent(new ServerEvent.Pong()));
+        assertEquals("SERVER_SHUTDOWN 5\n", ProtocolCodec.encodeEvent(new ServerEvent.ServerShutdown(5)));
     }
 
     @Test
@@ -153,7 +154,8 @@ class ProtocolCodecTest {
                 new ServerEvent.ErrorEvent("Not your turn to play!"),
                 new ServerEvent.ChatBroadcast("Alice", "Well played Bob"),
                 new ServerEvent.GameOver("Bob"),
-                new ServerEvent.Pong()
+                new ServerEvent.Pong(),
+                new ServerEvent.ServerShutdown(5)
         );
 
         for (ServerEvent event : testEvents) {
