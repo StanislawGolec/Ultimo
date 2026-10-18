@@ -33,6 +33,41 @@ class ProtocolCodecTest {
     }
 
     @Test
+    @DisplayName("Should validate usernames correctly according to sanitization rules")
+    void shouldValidateUsernamesCorrectly() {
+        // Valid usernames
+        assertTrue(ProtocolCodec.isValidUsername("Alice"));
+        assertTrue(ProtocolCodec.isValidUsername("Bob123"));
+        assertTrue(ProtocolCodec.isValidUsername("Michał"));
+        assertTrue(ProtocolCodec.isValidUsername("Żółw"));
+        assertTrue(ProtocolCodec.isValidUsername("User_99"));
+        assertTrue(ProtocolCodec.isValidUsername("Player#1"));
+        assertTrue(ProtocolCodec.isValidUsername("!@#$%^&*()"));
+        assertTrue(ProtocolCodec.isValidUsername("A-B_C=D+E"));
+        assertTrue(ProtocolCodec.isValidUsername("John Doe"));
+
+        // Invalid usernames
+        assertFalse(ProtocolCodec.isValidUsername(null));
+        assertFalse(ProtocolCodec.isValidUsername(""));
+        assertFalse(ProtocolCodec.isValidUsername("A")); // too short (< 2)
+        assertFalse(ProtocolCodec.isValidUsername("ThisUsernameIsWayTooLongToPass")); // > 24
+        assertFalse(ProtocolCodec.isValidUsername("User\nName")); // newline
+        assertFalse(ProtocolCodec.isValidUsername("User\tName")); // tab
+        assertFalse(ProtocolCodec.isValidUsername("User\rName")); // carriage return
+        assertFalse(ProtocolCodec.isValidUsername("Emoji😎")); // emoji
+        assertFalse(ProtocolCodec.isValidUsername(" LeadingSpace"));
+        assertFalse(ProtocolCodec.isValidUsername("TrailingSpace "));
+    }
+
+    @Test
+    @DisplayName("Should throw ProtocolException when JOIN command has invalid username")
+    void shouldThrowWhenJoinHasInvalidUsername() {
+        assertThrows(ProtocolException.class, () -> ProtocolCodec.decodeCommand("JOIN A"));
+        assertThrows(ProtocolException.class, () -> ProtocolCodec.decodeCommand("JOIN User\nName"));
+        assertThrows(ProtocolException.class, () -> ProtocolCodec.decodeCommand("JOIN " + "A".repeat(30)));
+    }
+
+    @Test
     @DisplayName("Should decode PLAY command with standard card")
     void shouldDecodePlayStandardCard() throws ProtocolException {
         // Name-based

@@ -38,9 +38,9 @@ public class RoomManager {
     public GameRoom matchmake(ClientSession session, String username) {
         matchmakeLock.lock();
         try {
-            // Look for an existing room waiting for players
+            // Look for an existing room waiting for players that doesn't already contain this username
             for (GameRoom room : activeRooms.values()) {
-                if (room.getState() == RoomState.WAITING_FOR_PLAYERS && !room.isFull()) {
+                if (room.getState() == RoomState.WAITING_FOR_PLAYERS && !room.isFull() && !room.hasPlayer(username)) {
                     boolean added = room.addPlayer(session, username);
                     if (added) {
                         sessionRoomMap.put(session.getSessionId(), room);
@@ -85,6 +85,11 @@ public class RoomManager {
 
             if (room.isFull()) {
                 session.sendEvent(new pl.ultimo.protocol.ServerEvent.ErrorEvent("Targeted room " + roomId + " is full"));
+                return room;
+            }
+
+            if (room.hasPlayer(username)) {
+                session.sendEvent(new pl.ultimo.protocol.ServerEvent.ErrorEvent("NAME_TAKEN: Player with name '" + username + "' already exists in this room"));
                 return room;
             }
 

@@ -215,10 +215,32 @@ public class ServerApp implements ConnectionListener {
                     session.sendEvent(new ServerEvent.ErrorEvent("Already joined as " + session.getUsername()));
                     return;
                 }
+                if (!ProtocolCodec.isValidUsername(join.username())) {
+                    session.sendEvent(new ServerEvent.ErrorEvent("INVALID_USERNAME: Username must be 2-24 characters using word characters and standard symbols"));
+                    return;
+                }
+
+                String targetRoomId = join.roomId();
+                if (targetRoomId != null && !targetRoomId.isBlank()) {
+                    Optional<GameRoom> existingRoomOpt = roomManager.getRoom(targetRoomId);
+                    if (existingRoomOpt.isPresent()) {
+                        GameRoom targetRoom = existingRoomOpt.get();
+                        if (targetRoom.isFull()) {
+                            session.sendEvent(new ServerEvent.ErrorEvent("Targeted room " + targetRoomId + " is full"));
+                            return;
+                        }
+                        if (targetRoom.hasPlayer(join.username())) {
+                            session.sendEvent(new ServerEvent.ErrorEvent("NAME_TAKEN: Player with name '" + join.username() + "' already exists in this room"));
+                            return;
+                        }
+                    }
+                }
+
                 session.setUsername(join.username());
                 session.sendEvent(new ServerEvent.Welcome(session.getSessionId(), "Welcome to Ultimo, " + join.username() + "!"));
-                if (join.roomId() != null && !join.roomId().isBlank()) {
-                    roomManager.joinRoom(session, join.username(), join.roomId());
+
+                if (targetRoomId != null && !targetRoomId.isBlank()) {
+                    roomManager.joinRoom(session, join.username(), targetRoomId);
                 } else {
                     roomManager.matchmake(session, join.username());
                 }

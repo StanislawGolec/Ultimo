@@ -140,4 +140,32 @@ class RoomManagerTest {
         assertEquals(2, r3.getPlayerCount());
         assertTrue(roomManager.getRoomForSession("s-3").isEmpty(), "Charlie should not be registered in sessionRoomMap");
     }
+
+    @Test
+    @DisplayName("Targeted room joining rejects duplicate player username in requested room")
+    void targetedRoomJoiningRejectsDuplicateUsername() throws Exception {
+        ClientSession alice1 = createDummySession("s-1", "Alice");
+        ClientSession alice2 = createDummySession("s-2", "Alice");
+
+        roomManager.joinRoom(alice1, "Alice", "custom-room-dup");
+        roomManager.joinRoom(alice2, "Alice", "custom-room-dup");
+
+        assertEquals(1, roomManager.getRoom("custom-room-dup").get().getPlayerCount());
+        assertTrue(roomManager.getRoomForSession("s-1").isPresent());
+        assertTrue(roomManager.getRoomForSession("s-2").isEmpty(), "Duplicate Alice should not be mapped to room");
+    }
+
+    @Test
+    @DisplayName("Matchmaking creates new room when open room already contains same username")
+    void matchmakingAvoidsDuplicateUsernameInSameRoom() throws Exception {
+        ClientSession alice1 = createDummySession("s-1", "Alice");
+        ClientSession alice2 = createDummySession("s-2", "Alice");
+
+        GameRoom r1 = roomManager.matchmake(alice1, "Alice");
+        GameRoom r2 = roomManager.matchmake(alice2, "Alice");
+
+        assertNotSame(r1, r2, "Second Alice should be matched into a separate room to prevent duplicate usernames");
+        assertEquals(1, r1.getPlayerCount());
+        assertEquals(1, r2.getPlayerCount());
+    }
 }

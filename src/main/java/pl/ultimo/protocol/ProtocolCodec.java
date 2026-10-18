@@ -10,6 +10,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -18,6 +19,17 @@ import java.util.stream.Collectors;
  * Wire lines are terminated with '\n'.
  */
 public final class ProtocolCodec {
+
+    public static final Pattern USERNAME_PATTERN = Pattern.compile(
+            "^[a-zA-Z0-9\\u00C0-\\u024F!@#$%^&*()_+\\-=\\[\\]{};':\"\\\\|,.<>/?~`]+(?: [a-zA-Z0-9\\u00C0-\\u024F!@#$%^&*()_+\\-=\\[\\]{};':\"\\\\|,.<>/?~`]+)*$"
+    );
+
+    public static boolean isValidUsername(String username) {
+        if (username == null || username.length() < 2 || username.length() > 24) {
+            return false;
+        }
+        return USERNAME_PATTERN.matcher(username).matches();
+    }
 
     private ProtocolCodec() {
         // Utility class
@@ -36,6 +48,10 @@ public final class ProtocolCodec {
         }
 
         String line = rawLine.trim();
+        if (line.chars().anyMatch(c -> c < 32)) {
+            throw new ProtocolException("Command line must not contain control characters or newlines");
+        }
+
         String[] parts = line.split("\\s+");
         String commandName = parts[0].toUpperCase();
 
@@ -46,19 +62,33 @@ public final class ProtocolCodec {
                         throw new ProtocolException("JOIN command requires a username: JOIN <username> [room_id]");
                     }
                     if (parts.length == 2) {
-                        yield new ClientCommand.Join(parts[1], null);
+                        String username = parts[1];
+                        if (!isValidUsername(username)) {
+                            throw new ProtocolException("INVALID_USERNAME: Username must be 2-24 characters using word characters and standard symbols");
+                        }
+                        yield new ClientCommand.Join(username, null);
                     }
                     if (parts.length == 3) {
-                        yield new ClientCommand.Join(parts[1], parts[2]);
+                        String username = parts[1];
+                        if (!isValidUsername(username)) {
+                            throw new ProtocolException("INVALID_USERNAME: Username must be 2-24 characters using word characters and standard symbols");
+                        }
+                        yield new ClientCommand.Join(username, parts[2]);
                     }
                     String lastToken = parts[parts.length - 1];
                     if (lastToken.toLowerCase().startsWith("room") || lastToken.toLowerCase().startsWith("r-")
                             || lastToken.contains("_") || lastToken.contains("-")) {
                         int end = line.lastIndexOf(lastToken);
                         String username = line.substring(line.indexOf(' ') + 1, end).trim();
+                        if (!isValidUsername(username)) {
+                            throw new ProtocolException("INVALID_USERNAME: Username must be 2-24 characters using word characters and standard symbols");
+                        }
                         yield new ClientCommand.Join(username, lastToken);
                     } else {
                         String username = line.substring(line.indexOf(' ') + 1).trim();
+                        if (!isValidUsername(username)) {
+                            throw new ProtocolException("INVALID_USERNAME: Username must be 2-24 characters using word characters and standard symbols");
+                        }
                         yield new ClientCommand.Join(username, null);
                     }
                 }

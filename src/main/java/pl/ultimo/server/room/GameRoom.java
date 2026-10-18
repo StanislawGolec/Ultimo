@@ -62,7 +62,23 @@ public class GameRoom implements Runnable {
     }
 
     /**
-     * Enrolls a player into the room if capacity is not exceeded and match hasn't started.
+     * Checks if a player with the specified username (case-insensitive) is already in the room.
+     */
+    public boolean hasPlayer(String username) {
+        if (username == null) {
+            return false;
+        }
+        roomLock.lock();
+        try {
+            return players.stream().anyMatch(p -> p.getUsername().equalsIgnoreCase(username.trim()));
+        } finally {
+            roomLock.unlock();
+        }
+    }
+
+    /**
+     * Enrolls a player into the room if capacity is not exceeded, match hasn't started,
+     * and username is unique in this room.
      */
     public boolean addPlayer(ClientSession session, String username) {
         Objects.requireNonNull(session, "session must not be null");
@@ -74,6 +90,11 @@ public class GameRoom implements Runnable {
 
         roomLock.lock();
         try {
+            if (players.stream().anyMatch(p -> p.getUsername().equalsIgnoreCase(username.trim()))) {
+                session.sendEvent(new ServerEvent.ErrorEvent("NAME_TAKEN: Player with name '" + username + "' already exists in this room"));
+                return false;
+            }
+
             if (state != RoomState.WAITING_FOR_PLAYERS || players.size() >= maxPlayers) {
                 return false;
             }

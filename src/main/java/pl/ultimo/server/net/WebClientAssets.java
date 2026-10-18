@@ -324,6 +324,7 @@ public final class WebClientAssets {
       switch(type) {
         case 'WELCOME':
           logMessage(`Server: ${parts.slice(2).join(' ')}`, 'info');
+          usernameInput.style.borderColor = '#334155';
           break;
 
         case 'ROOM_STATUS': {
@@ -432,7 +433,15 @@ public final class WebClientAssets {
         }
 
         case 'ERROR': {
-          logMessage(`Error: ${parts.slice(1).join(' ')}`, 'error');
+          const errMsg = parts.slice(1).join(' ');
+          logMessage(`Error: ${errMsg}`, 'error');
+          if (errMsg.includes('NAME_TAKEN') || errMsg.includes('INVALID_USERNAME') || !gameStarted) {
+            joinBtn.disabled = false;
+            usernameInput.disabled = false;
+            usernameInput.style.borderColor = '#ef4444';
+            usernameInput.focus();
+            myUsername = '';
+          }
           break;
         }
 
@@ -452,7 +461,7 @@ public final class WebClientAssets {
     }
 
     function isPlayableCard(token) {
-      if (!gameStarted || currentTurnPlayer !== myUsername || !token) return false;
+      if (!gameStarted || !myUsername || currentTurnPlayer !== myUsername || !token) return false;
       if (token.startsWith('WILD')) return true;
 
       const sep = token.indexOf('_');
@@ -472,7 +481,7 @@ public final class WebClientAssets {
     function updateTurnUI() {
       if (!gameStarted) return;
 
-      if (currentTurnPlayer === myUsername) {
+      if (myUsername && currentTurnPlayer === myUsername) {
         turnBanner.className = 'turn-banner my-turn';
         turnBanner.textContent = `★ YOUR TURN! (${currentActiveColor} active) ★`;
         drawBtn.disabled = hasDrawnThisTurn;
@@ -513,7 +522,7 @@ public final class WebClientAssets {
     }
 
     function isComboPlayable(tokens) {
-      if (!gameStarted || currentTurnPlayer !== myUsername || !tokens || tokens.length === 0) return false;
+      if (!gameStarted || !myUsername || currentTurnPlayer !== myUsername || !tokens || tokens.length === 0) return false;
       const firstVal = getCardValue(tokens[0]);
       const allSameVal = tokens.every(t => getCardValue(t) === firstVal);
       if (!allSameVal) return false;

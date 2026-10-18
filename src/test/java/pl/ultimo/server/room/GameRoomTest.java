@@ -450,4 +450,36 @@ class GameRoomTest {
                 .anyMatch(e -> e instanceof ServerEvent.ChallengeResult res && res.isGuilty() && res.penalizedPlayer().equals("Alice") && res.penaltyCards() == 4);
         assertTrue(gotChallengeResult, "Bob should receive CHALLENGE_RESULT event stating Alice was GUILTY and drew 4 cards");
     }
+
+    @Test
+    @DisplayName("Reject duplicate player names in the same room (case-insensitive)")
+    void shouldRejectDuplicatePlayerNamesInSameRoom() throws Exception {
+        GameRoom room = new GameRoom("room-dup", 4);
+        executor.submit(room);
+
+        TestClient alice1 = createTestClient("s-1", "Alice");
+        TestClient alice2 = createTestClient("s-2", "Alice");
+        TestClient aliceLower = createTestClient("s-3", "alice");
+
+        assertTrue(room.addPlayer(alice1.session, "Alice"));
+        assertTrue(room.hasPlayer("Alice"));
+        assertTrue(room.hasPlayer("alice"));
+        assertFalse(room.hasPlayer("Bob"));
+
+        // Exact match duplicate
+        assertFalse(room.addPlayer(alice2.session, "Alice"));
+        assertEquals(1, room.getPlayerCount());
+        alice2.drainEvents();
+        boolean gotNameTakenError1 = alice2.receivedEvents.stream()
+                .anyMatch(e -> e instanceof ServerEvent.ErrorEvent err && err.errorMessage().contains("NAME_TAKEN"));
+        assertTrue(gotNameTakenError1);
+
+        // Case-insensitive duplicate
+        assertFalse(room.addPlayer(aliceLower.session, "alice"));
+        assertEquals(1, room.getPlayerCount());
+        aliceLower.drainEvents();
+        boolean gotNameTakenError2 = aliceLower.receivedEvents.stream()
+                .anyMatch(e -> e instanceof ServerEvent.ErrorEvent err && err.errorMessage().contains("NAME_TAKEN"));
+        assertTrue(gotNameTakenError2);
+    }
 }
