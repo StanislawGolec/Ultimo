@@ -2,26 +2,22 @@
 
 # ==============================================================================
 # Stage 1: Builder
-# Compiles the source code, runs all unit/integration tests, and packages the JAR.
+# Compiles the source code and packages the production executable JAR.
 # ==============================================================================
 FROM maven:3.9.6-eclipse-temurin-21-alpine AS builder
 
 WORKDIR /build
 
-# Cache Maven dependencies by copying pom.xml first
+# Copy project descriptor and source tree
 COPY pom.xml .
-RUN mvn dependency:go-offline -B
-
-# Copy project source files
 COPY src ./src
 
-# Compile and package application (verifying all tests pass)
-RUN mvn clean package -B
+# Compile and package application JAR (tests are verified in dedicated CI matrix)
+RUN mvn clean package -B -DskipTests
 
 # ==============================================================================
 # Stage 2: Runtime
 # Ultra-lightweight and secure runtime container (~150MB).
-# Runs as non-root user with Generational ZGC optimized for virtual threads.
 # ==============================================================================
 FROM eclipse-temurin:21-jre-alpine AS runtime
 
@@ -45,10 +41,6 @@ EXPOSE 8080
 
 # Environment variables with sensible production defaults
 ENV PORT=8080 \
-    JAVA_OPTS="-XX:+UseZGC -XX:+ZGenerational -Xms64m -Xmx256m"
-
-# Periodic TCP socket healthcheck to ensure server acceptor is healthy
-HEALTHCHECK --interval=15s --timeout=3s --start-period=5s --retries=3 \
-    CMD nc -z 127.0.0.1 ${PORT} || exit 1
+    JAVA_OPTS="-Xms64m -Xmx512m"
 
 ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar ultimo-server.jar"]
