@@ -250,6 +250,16 @@ public class ServerApp implements ConnectionListener {
         roomManager.handleDisconnect(session);
     }
 
+    @Override
+    public void onShutdownRequested() {
+        Thread.ofVirtual().name("shutdown-handler").start(() -> {
+            try {
+                Thread.sleep(50);
+            } catch (InterruptedException ignored) {}
+            gracefulShutdown(config.shutdownDrainSeconds());
+        });
+    }
+
     public RoomManager getRoomManager() {
         return roomManager;
     }

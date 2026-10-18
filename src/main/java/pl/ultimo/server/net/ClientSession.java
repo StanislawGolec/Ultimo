@@ -177,6 +177,7 @@ public class ClientSession implements Runnable, Closeable {
         int statusCode = 200;
         String statusText = "OK";
 
+        boolean triggerShutdown = false;
         if (path.equals("/metrics")) {
             body = MetricsRegistry.getInstance().toPrometheusText().getBytes(StandardCharsets.UTF_8);
             contentType = "text/plain; version=0.0.4; charset=utf-8";
@@ -193,6 +194,10 @@ public class ClientSession implements Runnable, Closeable {
                 statusCode = 503;
                 statusText = "Service Unavailable";
             }
+        } else if (path.equals("/shutdown")) {
+            body = "Shutting down\n".getBytes(StandardCharsets.UTF_8);
+            contentType = "text/plain";
+            triggerShutdown = true;
         } else {
             body = WebClientAssets.getHtmlPage().getBytes(StandardCharsets.UTF_8);
             contentType = "text/html; charset=UTF-8";
@@ -212,6 +217,10 @@ public class ClientSession implements Runnable, Closeable {
             writeLock.unlock();
         }
         close();
+
+        if (triggerShutdown) {
+            listener.onShutdownRequested();
+        }
     }
 
     private void runWebSocketLoop() {

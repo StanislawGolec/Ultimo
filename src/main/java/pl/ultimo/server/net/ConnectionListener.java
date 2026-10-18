@@ -18,4 +18,10 @@ public interface ConnectionListener {
     default boolean isServerReady() {
         return true;
     }
+
+    /**
+     * Triggered when an administrative graceful shutdown is requested.
+     */
+    default void onShutdownRequested() {
+    }
 }
