@@ -509,13 +509,7 @@ class HeuristicBotEngineTest {
                     ).isEmpty(), "Bot play decision must always be legally valid");
                     assertTrue(engine.playCards(current, decision.cards(), decision.chosenWildColor()).success());
                 }
-                case DRAW -> {
-                    if (engine.getPendingWildChallenge() != null) {
-                        engine.acceptWildFourPenalty(current);
-                    } else {
-                        engine.drawCard(current);
-                    }
-                }
+                case DRAW -> engine.drawCard(current);
                 case PASS -> assertTrue(engine.passTurn(current));
                 default -> fail("Unexpected action: " + decision.action());
             }

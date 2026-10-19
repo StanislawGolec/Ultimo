@@ -61,6 +61,13 @@ public class HeuristicBotEngine {
             return BotDecision.declareUltimo();
         }
 
+        // 3. If targeted by a Wild Draw Four in classic mode (no stacking), draw to accept penalty
+        if (engine.getPendingWildChallenge() != null
+                && bot.equals(engine.getPendingWildChallenge().victim())
+                && !engine.isActionDefendingEnabled()) {
+            return BotDecision.draw();
+        }
+
         Card topCard = engine.getDiscardPile().getTopCard().orElse(null);
         CardColor activeColor = engine.getDiscardPile().getActiveColor();
         int pendingDrawPenalty = engine.getPendingDrawPenalty();

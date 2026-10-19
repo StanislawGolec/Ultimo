@@ -41,6 +41,6 @@ EXPOSE 8080
 
 # Environment variables with sensible production defaults
 ENV PORT=8080 \
-    JAVA_OPTS="-Xms64m -Xmx512m"
+    JAVA_OPTS="-Xms64m -Xmx512m -XX:+UseZGC -XX:+ZGenerational"
 
 ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar ultimo-server.jar"]
