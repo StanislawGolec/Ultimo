@@ -225,8 +225,6 @@ public class ServerApp implements ConnectionListener {
         }
 
         if (command instanceof ClientCommand.Quit) {
-            session.sendEvent(new ServerEvent.ChatBroadcast("SERVER", "QUIT_ACK"));
-            session.close();
             return;
         }
 

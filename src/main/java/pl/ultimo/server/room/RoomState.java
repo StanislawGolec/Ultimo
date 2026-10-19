@@ -6,5 +6,6 @@ package pl.ultimo.server.room;
 public enum RoomState {
     WAITING_FOR_PLAYERS,
     IN_PROGRESS,
+    ROUND_INTERMISSION,
     FINISHED;
 }

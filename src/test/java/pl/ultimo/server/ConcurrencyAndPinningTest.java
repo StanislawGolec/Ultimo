@@ -219,4 +219,28 @@ class ConcurrencyAndPinningTest {
                 "Found synchronized keyword in server package (violates Virtual Thread carrier non-pinning requirement):\n"
                         + String.join("\n", violations));
     }
+
+    @Test
+    @DisplayName("Verify GameRoom is a pure single-writer Actor with zero ReentrantLock or synchronized locks")
+    void shouldHaveZeroLocksInGameRoomActor() throws IOException {
+        Path gameRoomPath = Path.of("src", "main", "java", "pl", "ultimo", "server", "room", "GameRoom.java");
+        assertTrue(Files.exists(gameRoomPath), "GameRoom.java must exist");
+
+        List<String> lines = Files.readAllLines(gameRoomPath);
+        List<String> lockViolations = new ArrayList<>();
+        for (int i = 0; i < lines.size(); i++) {
+            String line = lines.get(i);
+            String trimmed = line.trim();
+            if (trimmed.startsWith("//") || trimmed.startsWith("*") || trimmed.startsWith("/*")) {
+                continue;
+            }
+            if (line.contains("ReentrantLock") || line.contains("roomLock") || line.contains("synchronized")) {
+                lockViolations.add("GameRoom.java:" + (i + 1) + " -> " + trimmed);
+            }
+        }
+
+        assertTrue(lockViolations.isEmpty(),
+                "GameRoom must be a pure single-writer Actor without ReentrantLock or synchronized:\n"
+                        + String.join("\n", lockViolations));
+    }
 }

@@ -20,7 +20,8 @@ import java.util.concurrent.locks.ReentrantLock;
 /**
  * Manages active rooms, handles matchmaking for incoming players,
  * and lifecycle cleanup of completed rooms.
- * Uses ReentrantLock and Virtual Threads for zero-pinning high scalability.
+ * Submits all room join, reconnect, bot enrollment, and disconnect events
+ * via {@link RoomEnvelope} messages to the target room's single-writer actor mailbox.
  */
 public class RoomManager {
 
@@ -38,7 +39,6 @@ public class RoomManager {
 
     /**
      * Finds an open public room with capacity or creates a new one, enrolling the player.
-     * Uses ReentrantLock to prevent Project Loom carrier thread pinning.
      */
     public GameRoom matchmake(ClientSession session, String username) {
         return matchmake(session, username, config.defaultRoomCapacity());
@@ -46,7 +46,6 @@ public class RoomManager {
 
     /**
      * Finds an open public room with capacity or creates a new one with the target capacity, enrolling the player.
-     * Uses ReentrantLock to prevent Project Loom carrier thread pinning.
      */
     public GameRoom matchmake(ClientSession session, String username, int capacity) {
         int targetCapacity = Math.clamp(capacity, GameRoom.MIN_CAPACITY, GameRoom.MAX_CAPACITY);
@@ -74,17 +73,18 @@ public class RoomManager {
                 }
             }
 
-            // If no available room, spin up a new public room
+            // If no available room, spin up a new public room and start its actor loop first
             String roomId = "room-" + roomCounter.getAndIncrement();
             GameRoom newRoom = new GameRoom(roomId, roomId, RoomVisibility.PUBLIC, null, targetCapacity, new Random(), (sess) -> sessionRoomMap.remove(sess.getSessionId()));
             newRoom.setOnRoomFinished(r -> activeRooms.remove(r.getRoomId()));
-            newRoom.addPlayer(session, username);
 
             activeRooms.put(roomId, newRoom);
-            sessionRoomMap.put(session.getSessionId(), newRoom);
-
-            // Run the room on its own dedicated virtual thread event loop
             roomExecutor.submit(newRoom);
+
+            boolean added = newRoom.addPlayer(session, username);
+            if (added) {
+                sessionRoomMap.put(session.getSessionId(), newRoom);
+            }
 
             return newRoom;
         } finally {
@@ -103,12 +103,15 @@ public class RoomManager {
             String effectiveName = (roomName != null && !roomName.isBlank()) ? roomName.trim() : roomId;
             GameRoom newRoom = new GameRoom(roomId, effectiveName, visibility, accessCode, targetCapacity, new Random(), (sess) -> sessionRoomMap.remove(sess.getSessionId()));
             newRoom.setOnRoomFinished(r -> activeRooms.remove(r.getRoomId()));
-            newRoom.addPlayer(session, username, accessCode);
 
             activeRooms.put(roomId, newRoom);
-            sessionRoomMap.put(session.getSessionId(), newRoom);
-
             roomExecutor.submit(newRoom);
+
+            boolean added = newRoom.addPlayer(session, username, accessCode);
+            if (added) {
+                sessionRoomMap.put(session.getSessionId(), newRoom);
+            }
+
             return newRoom;
         } finally {
             matchmakeLock.unlock();
@@ -210,6 +213,44 @@ public class RoomManager {
         }
     }
 
+    /**
+     * Reconnects a player to a specific room using a cryptographic reconnect token via {@link RoomEnvelope.ReconnectEnvelope}.
+     */
+    public boolean reconnectPlayer(ClientSession session, String username, String roomId, String token) {
+        if (session == null || username == null || roomId == null) {
+            return false;
+        }
+        matchmakeLock.lock();
+        try {
+            GameRoom room = activeRooms.get(roomId);
+            if (room == null) {
+                session.sendEvent(new ServerEvent.ErrorEvent("RECONNECT_FAILED: Room '" + roomId + "' not found"));
+                return false;
+            }
+            boolean reconnected = room.reconnectPlayer(session, username, token);
+            if (reconnected) {
+                sessionRoomMap.put(session.getSessionId(), room);
+            }
+            return reconnected;
+        } finally {
+            matchmakeLock.unlock();
+        }
+    }
+
+    /**
+     * Adds an autonomous virtual-thread bot to the specified room via {@link RoomEnvelope.AddBotEnvelope}.
+     */
+    public boolean addBotToRoom(String roomId, String botName, String difficulty) {
+        if (roomId == null) {
+            return false;
+        }
+        GameRoom room = activeRooms.get(roomId);
+        if (room == null) {
+            return false;
+        }
+        return room.addBot(botName, difficulty);
+    }
+
     public Optional<GameRoom> getRoomForSession(String sessionId) {
         if (sessionId == null) {
             return Optional.empty();
@@ -225,8 +266,8 @@ public class RoomManager {
     }
 
     /**
-     * Handles player disconnect, notifying the corresponding room and cleaning up empty rooms.
-     * Purges all session and room references to eliminate memory leaks.
+     * Handles player disconnect, notifying the corresponding room via {@link RoomEnvelope.DisconnectEnvelope}
+     * and cleaning up empty rooms.
      */
     public void handleDisconnect(ClientSession session) {
         if (session == null) {

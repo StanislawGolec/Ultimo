@@ -683,6 +683,7 @@ class GameRoomTest {
     @DisplayName("GameRoom broadcasts PLAYER_FINISHED and MATCH_STANDINGS across multi-tier finishes")
     void shouldBroadcastPodiumAndMatchStandingsWhenPlayersFinish() throws Exception {
         GameRoom room = new GameRoom("room-podium", 3);
+        room.setTargetScore(10);
         executor.submit(room);
 
         TestClient alice = createTestClient("s-1", "Alice");
@@ -1021,5 +1022,205 @@ class GameRoomTest {
 
         String activeAfter = room.getEngine().getTurnManager().getCurrentPlayer().getUsername();
         assertNotEquals(activeBefore, activeAfter, "Watchdog must automatically advance turn after timeout");
+    }
+
+    @Test
+    @DisplayName("Cryptographic reconnectToken validation rejects invalid tokens with ErrorEvent and accepts valid token")
+    void shouldValidateCryptographicReconnectTokenAndRejectInvalidTokens() throws Exception {
+        GameRoom room = new GameRoom("room-crypto-token", 2);
+        executor.submit(room);
+
+        TestClient alice = createTestClient("s-1", "Alice");
+        TestClient bob = createTestClient("s-2", "Bob");
+
+        assertTrue(room.addPlayer(alice.session, "Alice"));
+        assertTrue(room.addPlayer(bob.session, "Bob"));
+        assertEquals(RoomState.IN_PROGRESS, room.getState());
+
+        String aliceToken = room.getReconnectToken("Alice");
+        assertNotNull(aliceToken, "Alice must be assigned a cryptographic reconnectToken");
+        assertEquals(32, aliceToken.length(), "Token should be 128-bit (32 hex chars)");
+
+        Thread.sleep(100);
+        alice.drainEvents();
+        bob.drainEvents();
+
+        // Alice disconnects
+        room.handleDisconnect(alice.session);
+        assertTrue(room.isDisconnected("Alice"));
+        GameRoom.DisconnectedPlayerRecord record = room.getDisconnectedPlayer("Alice");
+        assertNotNull(record);
+        assertEquals(aliceToken, record.reconnectToken());
+
+        // Attacker attempts to reconnect as Alice with forged token via ReconnectEnvelope
+        TestClient attacker = createTestClient("s-attacker", "Alice");
+        java.util.concurrent.CompletableFuture<Boolean> forgedFuture = new java.util.concurrent.CompletableFuture<>();
+        room.submitEnvelope(new RoomEnvelope.ReconnectEnvelope(attacker.session, "Alice", "0000deadbeef0000", forgedFuture));
+        assertFalse(forgedFuture.get(2, TimeUnit.SECONDS), "Forged token must be rejected");
+        assertTrue(room.isDisconnected("Alice"), "Alice must remain in disconnectedPlayers after failed token attempt");
+
+        Thread.sleep(80);
+        attacker.drainEvents();
+        assertTrue(attacker.receivedEvents.stream()
+                .anyMatch(e -> e instanceof ServerEvent.ErrorEvent err && err.errorMessage().contains("INVALID_RECONNECT_TOKEN")));
+
+        // Legitimate Alice reconnects with valid cryptographic token via ReconnectEnvelope
+        TestClient aliceValid = createTestClient("s-alice-valid", "Alice");
+        java.util.concurrent.CompletableFuture<Boolean> validFuture = new java.util.concurrent.CompletableFuture<>();
+        room.submitEnvelope(new RoomEnvelope.ReconnectEnvelope(aliceValid.session, "Alice", aliceToken, validFuture));
+        assertTrue(validFuture.get(2, TimeUnit.SECONDS), "Valid cryptographic token must succeed");
+        assertFalse(room.isDisconnected("Alice"));
+
+        Thread.sleep(80);
+        aliceValid.drainEvents();
+        assertTrue(aliceValid.receivedEvents.stream().anyMatch(e -> e instanceof ServerEvent.HandUpdate));
+    }
+
+    @Test
+    @DisplayName("Multi-round tournament transitions to ROUND_INTERMISSION and starts next round on host START or timer")
+    void shouldExecuteNetworkMultiRoundTournamentLoop() throws Exception {
+        GameRoom room = new GameRoom("room-tournament", 2);
+        room.setRoundIntermissionMs(10_000L); // Long intermission so we test host START first
+        executor.submit(room);
+
+        TestClient alice = createTestClient("s-1", "Alice");
+        TestClient bob = createTestClient("s-2", "Bob");
+
+        room.addPlayer(alice.session, "Alice");
+        room.addPlayer(bob.session, "Bob");
+        assertEquals(RoomState.IN_PROGRESS, room.getState());
+
+        Thread.sleep(100);
+        alice.drainEvents();
+        bob.drainEvents();
+
+        UltimoEngine engine = room.getEngine();
+        assertNotNull(engine);
+
+        // Round 1: Alice wins round, Bob holds 100 points (< 500 targetScore)
+        Player current = engine.getTurnManager().getCurrentPlayer();
+        Player opponent = current.getUsername().equals("Alice") ? engine.getPlayers().get(1) : engine.getPlayers().get(0);
+        TestClient currentClient = current.getUsername().equals("Alice") ? alice : bob;
+
+        CardColor activeColor = engine.getDiscardPile().getActiveColor();
+        current.getHand().clear();
+        Card winCard1 = new Card(activeColor, CardValue.ONE);
+        current.getHand().addCard(winCard1);
+
+        opponent.getHand().clear();
+        opponent.getHand().addCard(new Card(CardColor.WILD, CardValue.WILD_DRAW_FOUR)); // 50 pts
+        opponent.getHand().addCard(new Card(CardColor.WILD, CardValue.WILD)); // 50 pts
+
+        room.enqueueCommand(currentClient.session, new ClientCommand.Play(winCard1, null));
+        Thread.sleep(150);
+        alice.drainEvents();
+        bob.drainEvents();
+
+        // Round 1 ended, tournament is NOT won yet (100 < 500) -> state must be ROUND_INTERMISSION
+        assertEquals(RoomState.ROUND_INTERMISSION, room.getState());
+        assertTrue(alice.receivedEvents.stream().anyMatch(
+                e -> e instanceof ServerEvent.RoundOver ro && ro.pointsEarned() == 100 && !ro.isTournamentWon()));
+        assertFalse(alice.receivedEvents.stream().anyMatch(e -> e instanceof ServerEvent.GameOver),
+                "GAME_OVER must not be emitted before 500-point tournament is won");
+
+        alice.receivedEvents.clear();
+        bob.receivedEvents.clear();
+
+        // Host (Alice) sends START during ROUND_INTERMISSION to immediately begin Round 2
+        room.enqueueCommand(alice.session, new ClientCommand.Start());
+        Thread.sleep(150);
+        alice.drainEvents();
+        bob.drainEvents();
+
+        assertEquals(RoomState.IN_PROGRESS, room.getState(), "Room must resume IN_PROGRESS for Round 2");
+        assertTrue(alice.receivedEvents.stream().anyMatch(e -> e instanceof ServerEvent.HandUpdate hu && hu.cards().size() == 7));
+        assertTrue(bob.receivedEvents.stream().anyMatch(e -> e instanceof ServerEvent.HandUpdate hu && hu.cards().size() == 7));
+
+        // Round 2: Same winner plays last card while opponent holds 400 points (total 100 + 400 = 500 >= 500)
+        Player r2Current = engine.getTurnManager().getCurrentPlayer();
+        Player r2Opponent = r2Current.getUsername().equals("Alice") ? engine.getPlayers().get(1) : engine.getPlayers().get(0);
+        TestClient r2Client = r2Current.getUsername().equals("Alice") ? alice : bob;
+
+        CardColor r2Color = engine.getDiscardPile().getActiveColor();
+        r2Current.getHand().clear();
+        Card winCard2 = new Card(r2Color, CardValue.TWO);
+        r2Current.getHand().addCard(winCard2);
+
+        r2Opponent.getHand().clear();
+        for (int i = 0; i < 8; i++) {
+            r2Opponent.getHand().addCard(new Card(CardColor.WILD, CardValue.WILD_DRAW_FOUR)); // 8 * 50 = 400 pts
+        }
+
+        room.enqueueCommand(r2Client.session, new ClientCommand.Play(winCard2, null));
+        Thread.sleep(150);
+        alice.drainEvents();
+        bob.drainEvents();
+
+        assertEquals(RoomState.FINISHED, room.getState(), "Room must transition to FINISHED when tournament is won");
+        assertTrue(alice.receivedEvents.stream().anyMatch(
+                e -> e instanceof ServerEvent.RoundOver ro && ro.isTournamentWon()));
+        assertTrue(alice.receivedEvents.stream().anyMatch(e -> e instanceof ServerEvent.MatchStandings));
+        assertTrue(alice.receivedEvents.stream().anyMatch(e -> e instanceof ServerEvent.GameOver));
+    }
+
+    @Test
+    @DisplayName("Round intermission countdown timer automatically starts next round when elapsed")
+    void shouldAutoStartNextRoundAfterIntermissionCountdown() throws Exception {
+        GameRoom room = new GameRoom("room-intermission-timer", 2);
+        room.setRoundIntermissionMs(80L);
+        executor.submit(room);
+
+        TestClient alice = createTestClient("s-1", "Alice");
+        TestClient bob = createTestClient("s-2", "Bob");
+
+        room.addPlayer(alice.session, "Alice");
+        room.addPlayer(bob.session, "Bob");
+        assertEquals(RoomState.IN_PROGRESS, room.getState());
+
+        UltimoEngine engine = room.getEngine();
+        Player current = engine.getTurnManager().getCurrentPlayer();
+        TestClient currentClient = current.getUsername().equals("Alice") ? alice : bob;
+
+        CardColor activeColor = engine.getDiscardPile().getActiveColor();
+        current.getHand().clear();
+        Card winCard = new Card(activeColor, CardValue.THREE);
+        current.getHand().addCard(winCard);
+
+        room.enqueueCommand(currentClient.session, new ClientCommand.Play(winCard, null));
+        Thread.sleep(30);
+        assertEquals(RoomState.ROUND_INTERMISSION, room.getState());
+
+        // Wait for 80ms intermission timer to trigger WatchdogTickEnvelope and start next round
+        Thread.sleep(150);
+        assertEquals(RoomState.IN_PROGRESS, room.getState(), "Intermission timer must automatically start next round");
+        assertEquals(7, current.getHand().size(), "Hands must be refreshed to 7 cards for the new round");
+    }
+
+    @Test
+    @DisplayName("AddBotEnvelope enrolls virtual-thread heuristic bots that autonomously play turns via room mailbox")
+    void shouldEnrollBotsViaAddBotEnvelopeAndPlayTurnsAutonomously() throws Exception {
+        GameRoom room = new GameRoom("room-bots", 2);
+        room.setTargetScore(10);
+        executor.submit(room);
+
+        java.util.concurrent.CompletableFuture<Boolean> bot1Future = new java.util.concurrent.CompletableFuture<>();
+        java.util.concurrent.CompletableFuture<Boolean> bot2Future = new java.util.concurrent.CompletableFuture<>();
+
+        room.submitEnvelope(new RoomEnvelope.AddBotEnvelope("BotAlpha", "HARD", bot1Future));
+        assertTrue(bot1Future.get(2, TimeUnit.SECONDS), "First bot should be added");
+        assertEquals(1, room.getPlayerCount());
+
+        room.submitEnvelope(new RoomEnvelope.AddBotEnvelope("BotBeta", "NORMAL", bot2Future));
+        assertTrue(bot2Future.get(2, TimeUnit.SECONDS), "Second bot should be added and auto-start match");
+        assertEquals(2, room.getPlayerCount());
+
+        // Wait for the two autonomous bots to finish the game
+        long deadline = System.currentTimeMillis() + 5_000L;
+        while (room.getState() != RoomState.FINISHED && System.currentTimeMillis() < deadline) {
+            Thread.sleep(25);
+        }
+
+        assertEquals(RoomState.FINISHED, room.getState(), "Two heuristic bots should autonomously complete the match");
+        room.stop();
     }
 }

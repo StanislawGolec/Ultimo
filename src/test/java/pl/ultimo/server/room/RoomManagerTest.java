@@ -291,4 +291,30 @@ class RoomManagerTest {
         assertFalse(room.isDisconnected("Alice"));
         assertTrue(roomManager.getRoomForSession("s-alice-3").isPresent());
     }
+
+    @Test
+    @DisplayName("RoomManager validates cryptographic reconnectToken via reconnectPlayer and supports addBotToRoom")
+    void reconnectPlayerWithCryptographicTokenAndAddBot() throws Exception {
+        ClientSession alice = createDummySession("s-alice", "Alice");
+        GameRoom room = roomManager.joinRoom(alice, "Alice", "bot-and-token-room", 2, null);
+
+        assertTrue(roomManager.addBotToRoom("bot-and-token-room", "BotOpponent", "HARD"));
+        assertEquals(2, room.getPlayerCount());
+        assertEquals(RoomState.IN_PROGRESS, room.getState());
+
+        String aliceToken = room.getReconnectToken("Alice");
+        assertNotNull(aliceToken);
+
+        roomManager.handleDisconnect(alice);
+        assertTrue(room.isDisconnected("Alice"));
+
+        ClientSession attacker = createDummySession("s-attacker", "Alice");
+        assertFalse(roomManager.reconnectPlayer(attacker, "Alice", "bot-and-token-room", "invalid-token"));
+        assertTrue(room.isDisconnected("Alice"));
+
+        ClientSession aliceRejoined = createDummySession("s-alice-rejoined", "Alice");
+        assertTrue(roomManager.reconnectPlayer(aliceRejoined, "Alice", "bot-and-token-room", aliceToken));
+        assertFalse(room.isDisconnected("Alice"));
+        assertTrue(roomManager.getRoomForSession("s-alice-rejoined").isPresent());
+    }
 }

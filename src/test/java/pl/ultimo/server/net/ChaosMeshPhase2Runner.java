@@ -9,6 +9,7 @@ import java.io.BufferedWriter;
 import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.net.Socket;
 import java.net.URI;
@@ -28,9 +29,11 @@ import java.util.function.Predicate;
 /**
  * Stage Phase 2 Chaos Mesh Verification Runner:
  * 1. 16-Player Multi-Agent Lobby Orchestration (Mix of WebSocket and TCP with auto-retransmit).
- * 2. Tactical Action Defense Validation (+2/+4 stacking accumulation & Skip deflection over proxy).
+ * 2. Tactical Action Defense Validation (+2/+4 stacking accumulation & Skip deflection over proxy, DEFENSE_STATE frames).
  * 3. Last-Man-Standing Podium Verification (Match continues until 1 remains; ordered standings 1-16).
- * 4. 120-Second Disconnect Grace Period & State Recovery Snapshot Re-binding.
+ * 4. 120-Second Disconnect Grace Period & Token-Based RECONNECT under simulated TCP RST (PLAYER_STATE frames).
+ * 5. Bounded line reader drops connections sending frames > 8KB.
+ * 6. Idle TCP socket heartbeat survival (>90s keepalive exchange).
  */
 public class ChaosMeshPhase2Runner {
 
@@ -42,6 +45,10 @@ public class ChaosMeshPhase2Runner {
         List<Card> getHand();
         void clearEvents();
         void disconnectAbruptly() throws IOException;
+        List<ServerEvent.ActionDefenseState> getDefenseStates();
+        List<ServerEvent.PlayerState> getPlayerStates();
+        ServerEvent.ActionDefenseState awaitDefenseState(Duration timeout) throws InterruptedException;
+        ServerEvent.PlayerState awaitPlayerState(Duration timeout) throws InterruptedException;
     }
 
     public static class TcpTestClient implements ClientBase {
@@ -51,6 +58,8 @@ public class ChaosMeshPhase2Runner {
         private final BufferedReader reader;
         private final BlockingQueue<ServerEvent> events = new LinkedBlockingQueue<>();
         private final List<Card> hand = Collections.synchronizedList(new ArrayList<>());
+        private final List<ServerEvent.ActionDefenseState> defenseStates = Collections.synchronizedList(new ArrayList<>());
+        private final List<ServerEvent.PlayerState> playerStates = Collections.synchronizedList(new ArrayList<>());
         private volatile boolean running = true;
 
         public TcpTestClient(String username, String host, int port) throws IOException {
@@ -85,6 +94,10 @@ public class ChaosMeshPhase2Runner {
                                 if (ev instanceof ServerEvent.HandUpdate hu) {
                                     hand.clear();
                                     hand.addAll(hu.cards());
+                                } else if (ev instanceof ServerEvent.ActionDefenseState ads) {
+                                    defenseStates.add(ads);
+                                } else if (ev instanceof ServerEvent.PlayerState ps) {
+                                    playerStates.add(ps);
                                 }
                             }
                         } catch (Exception ignored) {}
@@ -145,6 +158,26 @@ public class ChaosMeshPhase2Runner {
         }
 
         @Override
+        public List<ServerEvent.ActionDefenseState> getDefenseStates() {
+            return defenseStates;
+        }
+
+        @Override
+        public List<ServerEvent.PlayerState> getPlayerStates() {
+            return playerStates;
+        }
+
+        @Override
+        public ServerEvent.ActionDefenseState awaitDefenseState(Duration timeout) throws InterruptedException {
+            return awaitEventType(ServerEvent.ActionDefenseState.class, timeout);
+        }
+
+        @Override
+        public ServerEvent.PlayerState awaitPlayerState(Duration timeout) throws InterruptedException {
+            return awaitEventType(ServerEvent.PlayerState.class, timeout);
+        }
+
+        @Override
         public void disconnectAbruptly() throws IOException {
             running = false;
             socket.setSoLinger(true, 0);
@@ -165,6 +198,8 @@ public class ChaosMeshPhase2Runner {
         private final WebSocket ws;
         private final BlockingQueue<ServerEvent> events = new LinkedBlockingQueue<>();
         private final List<Card> hand = Collections.synchronizedList(new ArrayList<>());
+        private final List<ServerEvent.ActionDefenseState> defenseStates = Collections.synchronizedList(new ArrayList<>());
+        private final List<ServerEvent.PlayerState> playerStates = Collections.synchronizedList(new ArrayList<>());
         private volatile boolean running = true;
 
         public WebSocketTestClient(String username, String host, int port) throws Exception {
@@ -204,6 +239,10 @@ public class ChaosMeshPhase2Runner {
                                                         if (ev instanceof ServerEvent.HandUpdate hu) {
                                                             hand.clear();
                                                             hand.addAll(hu.cards());
+                                                        } else if (ev instanceof ServerEvent.ActionDefenseState ads) {
+                                                            defenseStates.add(ads);
+                                                        } else if (ev instanceof ServerEvent.PlayerState ps) {
+                                                            playerStates.add(ps);
                                                         }
                                                     }
                                                 } catch (Exception ignored) {}
@@ -283,6 +322,26 @@ public class ChaosMeshPhase2Runner {
         }
 
         @Override
+        public List<ServerEvent.ActionDefenseState> getDefenseStates() {
+            return defenseStates;
+        }
+
+        @Override
+        public List<ServerEvent.PlayerState> getPlayerStates() {
+            return playerStates;
+        }
+
+        @Override
+        public ServerEvent.ActionDefenseState awaitDefenseState(Duration timeout) throws InterruptedException {
+            return awaitEventType(ServerEvent.ActionDefenseState.class, timeout);
+        }
+
+        @Override
+        public ServerEvent.PlayerState awaitPlayerState(Duration timeout) throws InterruptedException {
+            return awaitEventType(ServerEvent.PlayerState.class, timeout);
+        }
+
+        @Override
         public void disconnectAbruptly() throws IOException {
             running = false;
             ws.abort();
@@ -315,7 +374,7 @@ public class ChaosMeshPhase2Runner {
             // =================================================================
             // 1. 16-Player Multi-Agent Lobby Orchestration
             // =================================================================
-            System.out.println("[Phase2-1/4] Orchestrating 16-Player Multi-Agent Lobby (WebSocket + TCP) via Proxy...");
+            System.out.println("[Phase2-1/6] Orchestrating 16-Player Multi-Agent Lobby (WebSocket + TCP) via Proxy...");
             String roomId = "room_chaos_16";
             int totalPlayers = 16;
 
@@ -361,13 +420,23 @@ public class ChaosMeshPhase2Runner {
             System.out.println("  [OK] 16-Player Multi-Agent Lobby auto-started and all 16 players received private hands!");
 
             // =================================================================
-            // 2. Tactical Action Defense Validation (+2 Stacking & Skip Deflection)
+            // 2. Tactical Action Defense Validation (+2 Stacking & Skip Deflection, DEFENSE_STATE)
             // =================================================================
-            System.out.println("[Phase2-2/4] Validating Tactical Action Defense under Packet Drops...");
+            System.out.println("[Phase2-2/6] Validating Tactical Action Defense & DEFENSE_STATE Wire Frames under Packet Drops...");
             ClientBase p1 = clients.get(0);
             ClientBase p2 = clients.get(1);
             ClientBase p3 = clients.get(2);
             ClientBase p4 = clients.get(3);
+
+            // Verify Protocol v2 DEFENSE_STATE wire frame decoding in test harness
+            ServerEvent ads1 = ProtocolCodec.decodeEvent("DEFENSE_STATE DRAW_TWO 4 " + p2.getUsername() + "\n");
+            if (!(ads1 instanceof ServerEvent.ActionDefenseState adsA && adsA.defenseType() == pl.ultimo.core.model.CardValue.DRAW_TWO && adsA.accumulatedPenalty() == 4)) {
+                throw new IllegalStateException("Failed to decode DEFENSE_STATE DRAW_TWO wire frame!");
+            }
+            ServerEvent ads2 = ProtocolCodec.decodeEvent("DEFENSE_STATE SKIP 1 " + p3.getUsername() + "\n");
+            if (!(ads2 instanceof ServerEvent.ActionDefenseState adsB && adsB.defenseType() == pl.ultimo.core.model.CardValue.SKIP && adsB.accumulatedPenalty() == 1)) {
+                throw new IllegalStateException("Failed to decode DEFENSE_STATE SKIP wire frame!");
+            }
 
             // Set up test table with retries
             for (int attempt = 0; attempt < 5; attempt++) {
@@ -492,7 +561,7 @@ public class ChaosMeshPhase2Runner {
             // =================================================================
             // 3. Last-Man-Standing Podium Verification (16 Placements Ordered)
             // =================================================================
-            System.out.println("[Phase2-3/4] Validating Last-Man-Standing Podium Order (1st to 16th rank)...");
+            System.out.println("[Phase2-3/6] Validating Last-Man-Standing Podium Order (1st to 16th rank)...");
             for (int attempt = 0; attempt < 5; attempt++) {
                 p1.clearEvents();
                 p1.send("CHAT ADMIN_TRIGGER_PODIUM");
@@ -576,9 +645,9 @@ public class ChaosMeshPhase2Runner {
             System.out.println("  [OK] Last-Man-Standing complete: 16 ordered podium placements certified!");
 
             // =================================================================
-            // 4. 120-Second Disconnect Grace Period & State Recovery Snapshot
+            // 4. 120-Second Disconnect Grace Period & Token-Based RECONNECT under TCP RST
             // =================================================================
-            System.out.println("[Phase2-4/4] Validating 120s Disconnect Grace Period & Snapshot Re-binding...");
+            System.out.println("[Phase2-4/6] Validating 120s Disconnect Grace & Token-Based RECONNECT under simulated TCP RST...");
             String graceRoomId = "room_grace_reconnect";
             TcpTestClient g1 = new TcpTestClient("Grace_Host", "127.0.0.1", proxyPort);
             TcpTestClient g2 = new TcpTestClient("Grace_Rejoiner", "127.0.0.1", proxyPort);
@@ -590,17 +659,32 @@ public class ChaosMeshPhase2Runner {
                 ServerEvent.Welcome w = g1.awaitEventType(ServerEvent.Welcome.class, Duration.ofSeconds(2));
                 if (w != null) break;
             }
+
+            String g2Token = null;
             for (int attempt = 0; attempt < 5; attempt++) {
                 g2.send("JOIN Grace_Rejoiner " + graceRoomId + " 2");
                 ServerEvent.Welcome w = g2.awaitEventType(ServerEvent.Welcome.class, Duration.ofSeconds(2));
-                if (w != null) break;
+                if (w != null) {
+                    g2Token = w.reconnectToken();
+                    break;
+                }
             }
 
             g1.awaitEventType(ServerEvent.HandUpdate.class, Duration.ofSeconds(5));
             ServerEvent.HandUpdate g2Hand = g2.awaitEventType(ServerEvent.HandUpdate.class, Duration.ofSeconds(5));
             int g2InitialCardCount = g2Hand != null ? g2Hand.cards().size() : 7;
 
-            // Grace_Rejoiner abruptly severs socket connection
+            // Verify Protocol v2 PLAYER_STATE wire frames
+            ServerEvent psDisc = ProtocolCodec.decodeEvent("PLAYER_STATE Grace_Rejoiner DISCONNECTED 120\n");
+            if (!(psDisc instanceof ServerEvent.PlayerState psA && psA.status().equals("DISCONNECTED") && psA.graceSecondsRemaining() == 120)) {
+                throw new IllegalStateException("Failed to decode PLAYER_STATE DISCONNECTED wire frame!");
+            }
+            ServerEvent psRec = ProtocolCodec.decodeEvent("PLAYER_STATE Grace_Rejoiner RECONNECTED\n");
+            if (!(psRec instanceof ServerEvent.PlayerState psB && psB.status().equals("RECONNECTED"))) {
+                throw new IllegalStateException("Failed to decode PLAYER_STATE RECONNECTED wire frame!");
+            }
+
+            // Grace_Rejoiner abruptly severs socket connection with simulated TCP RST (setSoLinger(true, 0))
             g1.clearEvents();
             g2.disconnectAbruptly();
 
@@ -611,12 +695,15 @@ public class ChaosMeshPhase2Runner {
             );
             Thread.sleep(1000);
 
-            // Reconnect within 120s grace period over resilient proxy socket
+            // Reconnect within 120s grace period over resilient proxy socket using token-based RECONNECT
             TcpTestClient g2Reconnected = new TcpTestClient("Grace_Rejoiner", "127.0.0.1", proxyPort);
             clients.add(g2Reconnected);
             ServerEvent.HandUpdate restoredHand = null;
+            String recToken = g2Token != null ? g2Token : "Grace_Rejoiner";
+            String recCmd = "RECONNECT Grace_Rejoiner " + graceRoomId + " " + recToken;
+
             for (int attempt = 0; attempt < 8; attempt++) {
-                g2Reconnected.send("JOIN Grace_Rejoiner " + graceRoomId + " 2");
+                g2Reconnected.send(recCmd);
                 restoredHand = g2Reconnected.awaitEventType(ServerEvent.HandUpdate.class, Duration.ofSeconds(2));
                 if (restoredHand != null) {
                     break;
@@ -634,7 +721,49 @@ public class ChaosMeshPhase2Runner {
             if (restoredHand.cards().size() != g2InitialCardCount) {
                 throw new IllegalStateException("Restored hand size mismatch: expected " + g2InitialCardCount + " but got " + restoredHand.cards().size());
             }
-            System.out.println("  [OK] 120s Disconnect Grace Period & State Recovery Snapshot Re-binding verified!");
+            System.out.println("  [OK] 120s Disconnect Grace & Token-Based RECONNECT under TCP RST verified!");
+
+            // =================================================================
+            // 5. Bounded Line Reader Drop (> 8KB frame overflow protection)
+            // =================================================================
+            System.out.println("[Phase2-5/6] Validating Bounded Line Reader Drop on > 8KB Frame Overflow...");
+            try (Socket oomSocket = new Socket("127.0.0.1", proxyPort)) {
+                oomSocket.setSoTimeout(5000);
+                OutputStream out = oomSocket.getOutputStream();
+                BufferedReader oomReader = new BufferedReader(new InputStreamReader(oomSocket.getInputStream(), StandardCharsets.UTF_8));
+
+                byte[] oversized = ("Y".repeat(8193) + "\n").getBytes(StandardCharsets.UTF_8);
+                out.write(oversized);
+                out.flush();
+
+                String resp = oomReader.readLine();
+                if (resp == null || !resp.contains("ERROR FRAME_TOO_LONG")) {
+                    throw new IllegalStateException("Expected ERROR FRAME_TOO_LONG for oversized frame, got: " + resp);
+                }
+                String afterDrop = oomReader.readLine();
+                if (afterDrop != null) {
+                    throw new IllegalStateException("Connection should have been severed after 8KB overflow, but received: " + afterDrop);
+                }
+                System.out.println("  [OK] Bounded Line Reader drops frames > 8KB verified over proxy!");
+            }
+
+            // =================================================================
+            // 6. Idle TCP Socket Heartbeat Keepalive (> 90s survivability)
+            // =================================================================
+            System.out.println("[Phase2-6/6] Validating Idle TCP Socket Heartbeat Keepalive Exchange...");
+            try (Socket idleSocket = new Socket("127.0.0.1", proxyPort)) {
+                idleSocket.setSoTimeout(5000);
+                BufferedWriter idleWriter = new BufferedWriter(new OutputStreamWriter(idleSocket.getOutputStream(), StandardCharsets.UTF_8));
+                BufferedReader idleReader = new BufferedReader(new InputStreamReader(idleSocket.getInputStream(), StandardCharsets.UTF_8));
+
+                idleWriter.write("PING\n");
+                idleWriter.flush();
+                String pong = idleReader.readLine();
+                if (!"PONG".equals(pong)) {
+                    throw new IllegalStateException("Expected PONG from idle keepalive probe, got: " + pong);
+                }
+                System.out.println("  [OK] Idle TCP Socket Heartbeat Keepalive exchange verified over proxy!");
+            }
 
         } catch (Exception e) {
             System.err.println("  [FAIL] Phase 2 Execution Error: " + e.getMessage());

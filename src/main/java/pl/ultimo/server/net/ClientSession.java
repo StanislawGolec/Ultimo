@@ -400,24 +400,24 @@ public class ClientSession implements Runnable, Closeable {
     }
 
     private void handleQuit(ClientCommand command) {
+        writeLock.lock();
+        try {
+            if (!isClosed.get()) {
+                ServerEvent ack = new ServerEvent.ChatBroadcast("SERVER", "QUIT_ACK");
+                if (isWebSocket) {
+                    WebSocketFrameCodec.writeTextFrame(rawOutputStream, ProtocolCodec.encodeEvent(ack).trim());
+                } else {
+                    rawOutputStream.write(ProtocolCodec.encodeEvent(ack).getBytes(StandardCharsets.UTF_8));
+                    rawOutputStream.flush();
+                }
+            }
+        } catch (IOException ignored) {
+        } finally {
+            writeLock.unlock();
+        }
         try {
             listener.onCommandReceived(this, command);
         } finally {
-            writeLock.lock();
-            try {
-                if (!isClosed.get()) {
-                    ServerEvent ack = new ServerEvent.ChatBroadcast("SERVER", "QUIT_ACK");
-                    if (isWebSocket) {
-                        WebSocketFrameCodec.writeTextFrame(rawOutputStream, ProtocolCodec.encodeEvent(ack).trim());
-                    } else {
-                        rawOutputStream.write(ProtocolCodec.encodeEvent(ack).getBytes(StandardCharsets.UTF_8));
-                        rawOutputStream.flush();
-                    }
-                }
-            } catch (IOException ignored) {
-            } finally {
-                writeLock.unlock();
-            }
             close();
         }
     }
