@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Scanner;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
@@ -42,6 +43,7 @@ public class TerminalClientApp {
     // Client view state
     private final List<Card> myHand = Collections.synchronizedList(new ArrayList<>());
     private final Map<String, Integer> opponentCardCounts = Collections.synchronizedMap(new LinkedHashMap<>());
+    private final Set<String> disconnectedOpponents = ConcurrentHashMap.newKeySet();
     private Card topCard;
     private CardColor activeColor;
     private String activePlayerName;
@@ -345,6 +347,20 @@ public class TerminalClientApp {
                 System.out.println("\n[-] BŁĄD RUCHU: " + err.errorMessage());
             }
             case ServerEvent.ChatBroadcast chat -> {
+                String msg = chat.message();
+                if ("GAME".equalsIgnoreCase(chat.sender())) {
+                    if (msg.contains("disconnected. They have 2 minutes to rejoin.")) {
+                        String name = msg.split(" ")[0];
+                        disconnectedOpponents.add(name);
+                    } else if (msg.contains("has reconnected!")) {
+                        String name = msg.split(" ")[0];
+                        disconnectedOpponents.remove(name);
+                    } else if (msg.contains("failed to reconnect") || msg.contains("was removed")) {
+                        String name = msg.split(" ")[0];
+                        disconnectedOpponents.remove(name);
+                        opponentCardCounts.remove(name);
+                    }
+                }
                 if (chat.message().contains("no playable moves") || chat.message().contains("auto-passed") || chat.message().contains("Turn passed")) {
                     System.out.println("\n[ℹ️ AUTO-PASS] " + chat.message());
                 } else {
@@ -422,7 +438,7 @@ public class TerminalClientApp {
             return;
         }
 
-        System.out.print("\n" + renderer.renderTable(topCard, activeColor, activePlayerName, username, opponentCardCounts, currentHudAlert));
+        System.out.print("\n" + renderer.renderTable(topCard, activeColor, activePlayerName, username, opponentCardCounts, currentHudAlert, disconnectedOpponents));
         System.out.println("Twoje karty:");
         synchronized (myHand) {
             System.out.println(renderer.renderHand(myHand));

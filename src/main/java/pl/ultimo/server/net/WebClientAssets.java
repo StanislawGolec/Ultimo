@@ -80,6 +80,9 @@ public final class WebClientAssets {
     .opponents-bar { display: flex; justify-content: center; gap: 8px; min-height: 52px; max-height: 130px; overflow-y: auto; flex-wrap: wrap; padding: 4px; align-content: flex-start; }
     .opponent-card { background: rgba(15, 23, 42, 0.85); border: 1px solid #334155; border-radius: 8px; padding: 4px 10px; display: flex; flex-direction: row; align-items: center; gap: 8px; transition: all 0.15s ease; font-size: 0.85rem; }
     .opponent-card.turn { border-color: #facc15; background: rgba(250, 204, 21, 0.15); box-shadow: 0 0 12px rgba(250, 204, 21, 0.5); }
+    .opponent-card.disconnected { border-color: #f59e0b; opacity: 0.75; background: rgba(30, 27, 75, 0.6); }
+    .badge-disconnected { background: #78350f; color: #fde68a; border: 1px solid #d97706; padding: 2px 6px; border-radius: 4px; font-size: 0.72rem; font-weight: 700; display: inline-block; animation: pulseDisconnect 2s infinite ease-in-out; }
+    @keyframes pulseDisconnect { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.6; transform: scale(0.97); } }
     .opponent-name { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 110px; }
     .opponent-badge { background: #1e293b; border: 1px solid #475569; border-radius: 9999px; padding: 2px 8px; font-size: 0.75rem; font-weight: 700; color: #38bdf8; white-space: nowrap; }
     .opponent-card.turn .opponent-badge { background: #facc15; color: #0f172a; border-color: #facc15; }
@@ -130,6 +133,8 @@ public final class WebClientAssets {
     .toast-container { position: fixed; bottom: 24px; right: 24px; display: flex; flex-direction: column; gap: 10px; z-index: 200; pointer-events: none; }
     .toast { background: rgba(15, 23, 42, 0.95); border: 1px solid #38bdf8; border-left: 4px solid #38bdf8; color: #f8fafc; padding: 12px 18px; border-radius: 8px; font-size: 0.9rem; font-weight: 600; box-shadow: 0 10px 25px rgba(0,0,0,0.5); display: flex; align-items: center; gap: 10px; animation: toastSlideIn 0.3s ease; pointer-events: auto; }
     .toast.autopass { border-color: #f59e0b; border-left-color: #f59e0b; }
+    .toast.disconnected { border-color: #f59e0b; border-left-color: #f59e0b; color: #fef3c7; }
+    .toast.reconnect { border-color: #10b981; border-left-color: #10b981; color: #d1fae5; }
     @keyframes toastSlideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
     .podium-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-radius: 8px; background: rgba(15, 23, 42, 0.8); border: 1px solid #334155; font-weight: 700; }
     .podium-row.rank-1 { border-color: #facc15; background: rgba(250, 204, 21, 0.15); color: #fef08a; }
@@ -326,6 +331,7 @@ public final class WebClientAssets {
     let hasDrawnThisTurn = false;
     let currentHandTokens = [];
     const opponentCounts = new Map();
+    const disconnectedOpponents = new Set();
 
     const joinBtn = document.getElementById('joinBtn');
     const roomCodeInput = document.getElementById('roomCodeInput');
@@ -801,6 +807,22 @@ public final class WebClientAssets {
           logMessage(`[${sender}]: ${msg}`, sender === 'GAME' ? 'win' : 'chat');
 
           if (sender === 'GAME') {
+            if (msg.includes('disconnected. They have 2 minutes to rejoin.')) {
+              const disconnectedName = msg.split(' ')[0];
+              disconnectedOpponents.add(disconnectedName);
+              renderOpponents();
+              showToast(`⚠️ ${disconnectedName} closed page / disconnected. 2m grace period active.`, 'disconnected');
+            } else if (msg.includes('has reconnected!')) {
+              const reconnectedName = msg.split(' ')[0];
+              disconnectedOpponents.delete(reconnectedName);
+              renderOpponents();
+              showToast(`✅ ${reconnectedName} reconnected!`, 'reconnect');
+            } else if (msg.includes('failed to reconnect') || msg.includes('was removed')) {
+              const removedName = msg.split(' ')[0];
+              disconnectedOpponents.delete(removedName);
+              opponentCounts.delete(removedName);
+              renderOpponents();
+            }
             if (msg.includes('Room Access Code:')) {
               activeAccessCode = msg.substring(msg.indexOf('Room Access Code:') + 17).trim();
               if (currentRoomId && currentRoomId !== '-') {
@@ -1004,13 +1026,15 @@ public final class WebClientAssets {
       opponentCounts.forEach((count, name) => {
         if (name !== myUsername) {
           const isTurn = name === currentTurnPlayer;
+          const isDisc = disconnectedOpponents.has(name);
           const div = document.createElement('div');
-          div.className = `opponent-card ${isTurn ? 'turn' : ''}`;
+          div.className = `opponent-card ${isTurn ? 'turn' : ''} ${isDisc ? 'disconnected' : ''}`;
           let catchHtml = '';
-          if (count === 1) {
+          if (count === 1 && !isDisc) {
             catchHtml = `<button class="btn-catch-ultimo" onclick="catchUltimo('${name}')" title="Catch ${name} without saying ULTIMO!">🚨 CATCH ULTIMO!</button>`;
           }
-          div.innerHTML = `<span class="opponent-name">${name}</span><span class="opponent-badge">${count} 🂠</span>${catchHtml}`;
+          let discBadgeHtml = isDisc ? '<span class="badge-disconnected" title="Player closed page / disconnected (2 min grace period)">⚠️ Offline (2m)</span>' : '';
+          div.innerHTML = `<span class="opponent-name">${name}</span>${discBadgeHtml}<span class="opponent-badge">${count} 🂠</span>${catchHtml}`;
           opponentsBar.appendChild(div);
         }
       });

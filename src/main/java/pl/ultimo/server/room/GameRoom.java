@@ -56,13 +56,18 @@ public class GameRoom implements Runnable {
     public record DisconnectedPlayerRecord(Player player, long disconnectedAt) {}
 
     public static final long DEFAULT_RECONNECT_GRACE_PERIOD_MS = 120_000L;
+    public static final long DEFAULT_AFK_TURN_TIMEOUT_MS = 120_000L;
     public static final long DEFAULT_WATCHDOG_CHECK_INTERVAL_MS = 5_000L;
 
     private final Map<String, DisconnectedPlayerRecord> disconnectedPlayers = new ConcurrentHashMap<>();
     private final AtomicBoolean isWatchdogRunning = new AtomicBoolean(false);
     private volatile Thread watchdogThread;
     private volatile long reconnectGracePeriodMs = DEFAULT_RECONNECT_GRACE_PERIOD_MS;
+    private volatile long afkTurnTimeoutMs = DEFAULT_AFK_TURN_TIMEOUT_MS;
     private volatile long watchdogCheckIntervalMs = DEFAULT_WATCHDOG_CHECK_INTERVAL_MS;
+    private volatile long turnStartedTimestamp = 0L;
+    private final Map<String, Integer> consecutiveAfkTurns = new ConcurrentHashMap<>();
+    private volatile String currentTurnPlayer = null;
     private Consumer<GameRoom> onRoomFinished;
 
     public static final int MIN_CAPACITY = 2;
@@ -306,12 +311,17 @@ public class GameRoom implements Runnable {
             this.engine = new UltimoEngine(players, random, UltimoEngine.DEFAULT_TARGET_SCORE, true, true);
             this.engine.start();
             this.state = RoomState.IN_PROGRESS;
+            this.turnStartedTimestamp = System.currentTimeMillis();
+            if (engine.getTurnManager() != null && engine.getTurnManager().getCurrentPlayer() != null) {
+                this.currentTurnPlayer = engine.getTurnManager().getCurrentPlayer().getUsername();
+            }
         } finally {
             roomLock.unlock();
         }
 
         broadcast(new ServerEvent.ChatBroadcast("GAME", "Game has started! Good luck."));
         broadcastGameState();
+        startWatchdogIfNeeded();
 
         return true;
     }
@@ -491,6 +501,9 @@ public class GameRoom implements Runnable {
             return;
         }
 
+        consecutiveAfkTurns.remove(player.getUsername().toLowerCase(java.util.Locale.ROOT));
+        turnStartedTimestamp = System.currentTimeMillis();
+
         if (play.cards().size() > 1) {
             broadcast(new ServerEvent.ChatBroadcast("GAME",
                     player.getUsername() + " played a combo of " + play.cards().size() + " cards!"));
@@ -597,6 +610,8 @@ public class GameRoom implements Runnable {
 
         UltimoEngine.WildChallengeResult res = engine.challengeWildFour(player);
         if (res.success()) {
+            consecutiveAfkTurns.remove(player.getUsername().toLowerCase(java.util.Locale.ROOT));
+            turnStartedTimestamp = System.currentTimeMillis();
             broadcast(new ServerEvent.ChallengeResult(player.getUsername(), res.penalizedPlayer().getUsername(), res.isGuilty(), res.penalizedPlayer().getUsername(), res.cardsDrawn()));
             broadcast(new ServerEvent.ChatBroadcast("GAME", res.message()));
             broadcastGameState();
@@ -619,6 +634,9 @@ public class GameRoom implements Runnable {
             session.sendEvent(new ServerEvent.ErrorEvent("Cannot draw (either not your turn or already drawn this turn)"));
             return;
         }
+
+        consecutiveAfkTurns.remove(player.getUsername().toLowerCase(java.util.Locale.ROOT));
+        turnStartedTimestamp = System.currentTimeMillis();
 
         if (drawRes.cardsDrawn() > 1) {
             broadcast(new ServerEvent.ChatBroadcast("GAME",
@@ -659,6 +677,9 @@ public class GameRoom implements Runnable {
             return;
         }
 
+        consecutiveAfkTurns.remove(player.getUsername().toLowerCase(java.util.Locale.ROOT));
+        turnStartedTimestamp = System.currentTimeMillis();
+
         if (wasSkipVictim) {
             broadcast(new ServerEvent.ChatBroadcast("GAME", player.getUsername() + " was skipped!"));
         } else if (wasDrawVictim) {
@@ -670,6 +691,39 @@ public class GameRoom implements Runnable {
     }
 
     private void handleChat(ClientSession session, ClientCommand.Chat chat) {
+        String msg = chat.message() != null ? chat.message().trim() : "";
+        if ("ADMIN_SETUP_DEFENSE".equals(msg)) {
+            if (engine != null) {
+                roomLock.lock();
+                try {
+                    engine.setupDefenseScenario();
+                    turnStartedTimestamp = System.currentTimeMillis();
+                    if (engine.getTurnManager() != null && engine.getTurnManager().getCurrentPlayer() != null) {
+                        currentTurnPlayer = engine.getTurnManager().getCurrentPlayer().getUsername();
+                    }
+                } finally {
+                    roomLock.unlock();
+                }
+                broadcastGameState();
+            }
+            return;
+        }
+        if ("ADMIN_TRIGGER_PODIUM".equals(msg)) {
+            if (engine != null) {
+                roomLock.lock();
+                try {
+                    engine.setupPodiumScenario();
+                    turnStartedTimestamp = System.currentTimeMillis();
+                    if (engine.getTurnManager() != null && engine.getTurnManager().getCurrentPlayer() != null) {
+                        currentTurnPlayer = engine.getTurnManager().getCurrentPlayer().getUsername();
+                    }
+                } finally {
+                    roomLock.unlock();
+                }
+                broadcastGameState();
+            }
+            return;
+        }
         String senderName = session.getUsername() != null ? session.getUsername() : "Player";
         broadcast(new ServerEvent.ChatBroadcast(senderName, chat.message()));
     }
@@ -687,6 +741,11 @@ public class GameRoom implements Runnable {
         }
 
         GameState snapshot = engine.captureSnapshot();
+        String activePlayer = snapshot.activePlayerName();
+        if (activePlayer != null && !activePlayer.equals(currentTurnPlayer)) {
+            currentTurnPlayer = activePlayer;
+            turnStartedTimestamp = System.currentTimeMillis();
+        }
 
         // 1. Public table state
         broadcast(new ServerEvent.TopCard(snapshot.topCard(), snapshot.activeColor()));
@@ -826,7 +885,7 @@ public class GameRoom implements Runnable {
     }
 
     private void startWatchdogIfNeeded() {
-        if (!isRunning.get() || state != RoomState.IN_PROGRESS || disconnectedPlayers.isEmpty()) {
+        if (!isRunning.get() || state != RoomState.IN_PROGRESS) {
             return;
         }
         if (isWatchdogRunning.compareAndSet(false, true)) {
@@ -836,13 +895,10 @@ public class GameRoom implements Runnable {
 
     private void runWatchdog() {
         try {
-            while (isRunning.get() && isWatchdogRunning.get()) {
+            while (isRunning.get() && isWatchdogRunning.get() && state == RoomState.IN_PROGRESS) {
                 Thread.sleep(watchdogCheckIntervalMs);
                 checkExpiredDisconnections();
-                if (disconnectedPlayers.isEmpty()) {
-                    isWatchdogRunning.set(false);
-                    break;
-                }
+                checkTurnInactivity();
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -874,11 +930,78 @@ public class GameRoom implements Runnable {
         }
     }
 
+    public void checkTurnInactivity() {
+        checkTurnInactivity(System.currentTimeMillis());
+    }
+
+    public void checkTurnInactivity(long now) {
+        if (state != RoomState.IN_PROGRESS || engine == null) {
+            return;
+        }
+
+        Player activePlayer = null;
+        boolean isAfkTimeout = false;
+        int afkCount = 0;
+
+        roomLock.lock();
+        try {
+            if (state != RoomState.IN_PROGRESS || engine == null || engine.isGameOver()) {
+                return;
+            }
+            activePlayer = engine.getTurnManager().getCurrentPlayer();
+            if (activePlayer == null || isDisconnected(activePlayer.getUsername())) {
+                return;
+            }
+
+            if (turnStartedTimestamp > 0 && (now - turnStartedTimestamp >= afkTurnTimeoutMs)) {
+                isAfkTimeout = true;
+                String key = activePlayer.getUsername().toLowerCase(java.util.Locale.ROOT);
+                afkCount = consecutiveAfkTurns.merge(key, 1, Integer::sum);
+            }
+        } finally {
+            roomLock.unlock();
+        }
+
+        if (isAfkTimeout && activePlayer != null) {
+            if (afkCount >= 2) {
+                handleAfkKick(activePlayer);
+            } else {
+                roomLock.lock();
+                try {
+                    if (state == RoomState.IN_PROGRESS && engine != null && !engine.isGameOver()
+                            && activePlayer.equals(engine.getTurnManager().getCurrentPlayer())) {
+                        if (!engine.hasDrawnThisTurn()) {
+                            engine.drawCardWithResult(activePlayer);
+                        }
+                        if (activePlayer.equals(engine.getTurnManager().getCurrentPlayer())) {
+                            engine.passTurn(activePlayer);
+                        }
+                        this.turnStartedTimestamp = now;
+                    }
+                } finally {
+                    roomLock.unlock();
+                }
+
+                broadcast(new ServerEvent.ChatBroadcast("GAME",
+                        activePlayer.getUsername() + " was inactive for 2 minutes; turn auto-passed."));
+                broadcastGameState();
+            }
+        }
+    }
+
     private void handleExpiredPlayer(Player player) {
+        removePlayerFromMatch(player, player.getUsername() + " failed to reconnect within 2 minutes and was removed.", false);
+    }
+
+    private void handleAfkKick(Player player) {
+        removePlayerFromMatch(player, player.getUsername() + " was removed from match due to repeated inactivity.", true);
+    }
+
+    private void removePlayerFromMatch(Player player, String reasonMessage, boolean isAfkKick) {
         Player winner = null;
-        boolean wasCurrentTurn = false;
         int remainingCount;
         String nextOwner = null;
+        ClientSession playerSession = null;
 
         roomLock.lock();
         try {
@@ -887,10 +1010,29 @@ public class GameRoom implements Runnable {
             }
 
             if (engine != null) {
-                wasCurrentTurn = engine.removePlayer(player);
+                engine.removePlayer(player);
             }
             players.remove(player);
             remainingCount = players.size();
+            consecutiveAfkTurns.remove(player.getUsername().toLowerCase(java.util.Locale.ROOT));
+
+            if (isAfkKick) {
+                for (Map.Entry<String, Player> entry : sessionPlayerMap.entrySet()) {
+                    if (entry.getValue().equals(player)) {
+                        for (ClientSession s : sessions) {
+                            if (s.getSessionId().equals(entry.getKey())) {
+                                playerSession = s;
+                                break;
+                            }
+                        }
+                        break;
+                    }
+                }
+                if (playerSession != null) {
+                    sessions.remove(playerSession);
+                    sessionPlayerMap.remove(playerSession.getSessionId());
+                }
+            }
 
             boolean wasOwner = ownerUsername != null && player.getUsername().equalsIgnoreCase(ownerUsername);
             if (wasOwner) {
@@ -919,7 +1061,11 @@ public class GameRoom implements Runnable {
             roomLock.unlock();
         }
 
-        broadcast(new ServerEvent.ChatBroadcast("GAME", player.getUsername() + " failed to reconnect within 2 minutes and was removed."));
+        if (playerSession != null) {
+            playerSession.sendEvent(new ServerEvent.ErrorEvent("KICKED: " + reasonMessage));
+        }
+
+        broadcast(new ServerEvent.ChatBroadcast("GAME", reasonMessage));
 
         if (nextOwner != null) {
             broadcast(new ServerEvent.RoomOwnerChanged(nextOwner));
@@ -933,6 +1079,7 @@ public class GameRoom implements Runnable {
         } else if (remainingCount == 0) {
             stop();
         } else {
+            this.turnStartedTimestamp = System.currentTimeMillis();
             broadcastGameState();
         }
     }
@@ -1030,6 +1177,27 @@ public class GameRoom implements Runnable {
         this.watchdogCheckIntervalMs = Math.max(10L, millis);
     }
 
+    public long getAfkTurnTimeoutMs() {
+        return afkTurnTimeoutMs;
+    }
+
+    public void setAfkTurnTimeoutMs(long millis) {
+        this.afkTurnTimeoutMs = Math.max(10L, millis);
+    }
+
+    public long getTurnStartedTimestamp() {
+        return turnStartedTimestamp;
+    }
+
+    public void setTurnStartedTimestamp(long timestamp) {
+        this.turnStartedTimestamp = timestamp;
+    }
+
+    public int getConsecutiveAfkTurns(String username) {
+        if (username == null) return 0;
+        return consecutiveAfkTurns.getOrDefault(username.trim().toLowerCase(java.util.Locale.ROOT), 0);
+    }
+
     public void setOnRoomFinished(Consumer<GameRoom> onRoomFinished) {
         this.onRoomFinished = onRoomFinished;
     }
@@ -1040,6 +1208,7 @@ public class GameRoom implements Runnable {
         if (watchdogThread != null) {
             watchdogThread.interrupt();
         }
+        consecutiveAfkTurns.clear();
         roomLock.lock();
         try {
             sessions.clear();

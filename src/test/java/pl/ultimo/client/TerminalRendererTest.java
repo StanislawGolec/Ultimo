@@ -121,4 +121,26 @@ class TerminalRendererTest {
         assertTrue(podium.contains("🥈 2nd PLACE: Bob (310 pkt)"));
         assertTrue(podium.contains("🥉 3rd PLACE: Charlie (120 pkt)"));
     }
+
+    @Test
+    @DisplayName("Disconnected opponent should display offline grace tag in table view")
+    void disconnectedOpponentDisplaysOfflineTag() {
+        TerminalRenderer plainRenderer = TerminalRenderer.plain();
+        Card topCard = new Card(CardColor.BLUE, CardValue.SEVEN);
+        Map<String, Integer> opponents = Map.of("Bob", 4, "Charlie", 6);
+        java.util.Set<String> disconnected = java.util.Set.of("Bob");
+
+        String plainTable = plainRenderer.renderTable(topCard, CardColor.BLUE, "Charlie", "Alice", opponents, null, disconnected);
+        assertTrue(plainTable.contains("Bob [DISCONNECTED - 2m grace] (4 kart)"),
+                "Plain table must format disconnected opponent with offline grace tag");
+        assertFalse(plainTable.contains("Charlie [DISCONNECTED"),
+                "Connected opponent must not display disconnected tag");
+
+        TerminalRenderer coloredRenderer = TerminalRenderer.colored();
+        String coloredTable = coloredRenderer.renderTable(topCard, CardColor.BLUE, "Charlie", "Alice", opponents, null, disconnected);
+        assertTrue(coloredTable.contains("[DISCONNECTED - 2m grace]"),
+                "Colored table must include offline tag");
+        assertTrue(coloredTable.contains("\u001B[93m"),
+                "Colored table must include yellow ANSI code for disconnect warning tag");
+    }
 }

@@ -874,4 +874,152 @@ class GameRoomTest {
         String nextTurn = room.getEngine().getTurnManager().getCurrentPlayer().getUsername();
         assertNotEquals(currentTurn, nextTurn, "Turn must advance away from expired player");
     }
+
+    @Test
+    @DisplayName("Connected player going AFK on their turn triggers auto-draw and auto-pass via checkTurnInactivity")
+    void testConnectedPlayerAfkTurnTimeout() throws Exception {
+        GameRoom room = new GameRoom("room-afk-1", 2);
+        long t0 = 1_000_000L;
+
+        TestClient alice = createTestClient("s-1", "Alice");
+        TestClient bob = createTestClient("s-2", "Bob");
+
+        room.addPlayer(alice.session, "Alice");
+        room.addPlayer(bob.session, "Bob"); // Starts match
+        assertEquals(RoomState.IN_PROGRESS, room.getState());
+
+        String activeUser = room.getEngine().getTurnManager().getCurrentPlayer().getUsername();
+        room.setTurnStartedTimestamp(t0);
+
+        // Before timeout (t0 + 60s) -> no timeout
+        room.checkTurnInactivity(t0 + 60_000L);
+        assertEquals(activeUser, room.getEngine().getTurnManager().getCurrentPlayer().getUsername());
+        assertEquals(0, room.getConsecutiveAfkTurns(activeUser));
+
+        // After timeout (t0 + 121s) -> auto-draw & auto-pass
+        room.checkTurnInactivity(t0 + 121_000L);
+
+        String newActiveUser = room.getEngine().getTurnManager().getCurrentPlayer().getUsername();
+        assertNotEquals(activeUser, newActiveUser, "Turn must advance after AFK turn timeout");
+        assertEquals(1, room.getConsecutiveAfkTurns(activeUser));
+
+        alice.drainEvents();
+        bob.drainEvents();
+        assertTrue(alice.receivedEvents.stream().anyMatch(e -> e instanceof ServerEvent.ChatBroadcast cb &&
+                cb.message().contains(activeUser + " was inactive for 2 minutes; turn auto-passed.")));
+        assertTrue(bob.receivedEvents.stream().anyMatch(e -> e instanceof ServerEvent.ChatBroadcast cb &&
+                cb.message().contains(activeUser + " was inactive for 2 minutes; turn auto-passed.")));
+    }
+
+    @Test
+    @DisplayName("Two consecutive AFK turn timeouts kicks player and awards forfeit victory to remaining player")
+    void testTwoConsecutiveAfkTimeoutsKicksPlayer() throws Exception {
+        GameRoom room = new GameRoom("room-afk-kick", 2);
+        long t0 = 1_000_000L;
+
+        TestClient alice = createTestClient("s-1", "Alice");
+        TestClient bob = createTestClient("s-2", "Bob");
+
+        room.addPlayer(alice.session, "Alice");
+        room.addPlayer(bob.session, "Bob"); // Starts match
+        assertEquals(RoomState.IN_PROGRESS, room.getState());
+
+        String firstPlayer = room.getEngine().getTurnManager().getCurrentPlayer().getUsername();
+        String secondPlayer = firstPlayer.equals("Alice") ? "Bob" : "Alice";
+        room.setTurnStartedTimestamp(t0);
+
+        // 1st AFK timeout for firstPlayer
+        room.checkTurnInactivity(t0 + 121_000L);
+        assertEquals(1, room.getConsecutiveAfkTurns(firstPlayer));
+        assertEquals(secondPlayer, room.getEngine().getTurnManager().getCurrentPlayer().getUsername());
+
+        // Second player passes back to first player
+        Player p2 = room.getEngine().getTurnManager().getCurrentPlayer();
+        UltimoEngine.DrawResult dr = room.getEngine().drawCardWithResult(p2);
+        if (!dr.autoPassed()) {
+            room.getEngine().passTurn(p2);
+        }
+        assertEquals(firstPlayer, room.getEngine().getTurnManager().getCurrentPlayer().getUsername());
+
+        long t1 = t0 + 200_000L;
+        room.setTurnStartedTimestamp(t1);
+
+        // 2nd AFK timeout for firstPlayer -> kicks player
+        room.checkTurnInactivity(t1 + 121_000L);
+
+        assertEquals(RoomState.FINISHED, room.getState());
+        assertEquals(1, room.getPlayerCount());
+        assertEquals(secondPlayer, room.getPlayerNames().getFirst());
+
+        TestClient secondClient = secondPlayer.equals("Alice") ? alice : bob;
+        secondClient.drainEvents();
+        assertTrue(secondClient.receivedEvents.stream().anyMatch(e -> e instanceof ServerEvent.ChatBroadcast cb &&
+                cb.message().contains(firstPlayer + " was removed from match due to repeated inactivity.")));
+        assertTrue(secondClient.receivedEvents.stream().anyMatch(e -> e instanceof ServerEvent.GameOver go &&
+                go.winnerName().equals(secondPlayer)));
+        assertTrue(secondClient.receivedEvents.stream().anyMatch(e -> e instanceof ServerEvent.ChatBroadcast cb &&
+                cb.message().contains(secondPlayer + " wins by forfeit!")));
+    }
+
+    @Test
+    @DisplayName("Conscious player move resets consecutive AFK counter")
+    void testConsciousMoveResetsAfkCounter() throws Exception {
+        GameRoom room = new GameRoom("room-afk-reset", 2);
+        long t0 = 1_000_000L;
+
+        TestClient alice = createTestClient("s-1", "Alice");
+        TestClient bob = createTestClient("s-2", "Bob");
+
+        room.addPlayer(alice.session, "Alice");
+        room.addPlayer(bob.session, "Bob"); // Starts match
+        assertEquals(RoomState.IN_PROGRESS, room.getState());
+
+        String firstPlayer = room.getEngine().getTurnManager().getCurrentPlayer().getUsername();
+        TestClient firstClient = firstPlayer.equals("Alice") ? alice : bob;
+        room.setTurnStartedTimestamp(t0);
+
+        // 1st AFK timeout
+        room.checkTurnInactivity(t0 + 121_000L);
+        assertEquals(1, room.getConsecutiveAfkTurns(firstPlayer));
+
+        // Pass turn back to first player
+        Player p2 = room.getEngine().getTurnManager().getCurrentPlayer();
+        UltimoEngine.DrawResult dr = room.getEngine().drawCardWithResult(p2);
+        if (!dr.autoPassed()) {
+            room.getEngine().passTurn(p2);
+        }
+        assertEquals(firstPlayer, room.getEngine().getTurnManager().getCurrentPlayer().getUsername());
+
+        // When player draws or passes, consecutiveAfkTurns resets
+        executor.submit(room);
+        room.enqueueCommand(firstClient.session, new ClientCommand.Draw());
+        Thread.sleep(100);
+        assertEquals(0, room.getConsecutiveAfkTurns(firstPlayer), "Conscious draw command must reset AFK counter");
+    }
+
+    @Test
+    @DisplayName("Virtual Thread watchdog automatically detects idle player and auto-passes turn")
+    void testWatchdogLiveExecution() throws Exception {
+        GameRoom room = new GameRoom("room-watchdog-live", 2);
+        room.setAfkTurnTimeoutMs(150);
+        room.setWatchdogCheckIntervalMs(30);
+        executor.submit(room);
+
+        TestClient alice = createTestClient("s-1", "Alice");
+        TestClient bob = createTestClient("s-2", "Bob");
+
+        room.addPlayer(alice.session, "Alice");
+        room.addPlayer(bob.session, "Bob"); // Starts match
+        assertEquals(RoomState.IN_PROGRESS, room.getState());
+
+        String activeBefore = room.getEngine().getTurnManager().getCurrentPlayer().getUsername();
+        Thread.sleep(50);
+        assertEquals(activeBefore, room.getEngine().getTurnManager().getCurrentPlayer().getUsername());
+
+        // Wait past 150ms timeout
+        Thread.sleep(220);
+
+        String activeAfter = room.getEngine().getTurnManager().getCurrentPlayer().getUsername();
+        assertNotEquals(activeBefore, activeAfter, "Watchdog must automatically advance turn after timeout");
+    }
 }

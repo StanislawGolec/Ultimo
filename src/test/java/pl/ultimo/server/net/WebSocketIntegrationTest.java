@@ -68,6 +68,9 @@ class WebSocketIntegrationTest {
         assertEquals(200, response.statusCode());
         assertTrue(response.body().contains("<!DOCTYPE html>"));
         assertTrue(response.body().contains("Ultimo Multiplayer | Web Edition"));
+        assertTrue(response.body().contains("disconnectedOpponents"), "Web client must maintain disconnectedOpponents set");
+        assertTrue(response.body().contains("badge-disconnected"), "Web client must include disconnected avatar badge styles");
+        assertTrue(response.body().contains("pulseDisconnect"), "Web client must include pulsating offline badge animation");
     }
 
     @Test

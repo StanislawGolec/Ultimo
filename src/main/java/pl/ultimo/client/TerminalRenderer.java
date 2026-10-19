@@ -3,9 +3,11 @@ package pl.ultimo.client;
 import pl.ultimo.core.model.Card;
 import pl.ultimo.core.model.CardColor;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Renders Ultimo cards, hands, and game table in the terminal.
@@ -148,6 +150,17 @@ public class TerminalRenderer {
             String myUsername,
             Map<String, Integer> opponentCardCounts,
             String hudAlert) {
+        return renderTable(topCard, activeColor, activePlayer, myUsername, opponentCardCounts, hudAlert, Collections.emptySet());
+    }
+
+    public String renderTable(
+            Card topCard,
+            CardColor activeColor,
+            String activePlayer,
+            String myUsername,
+            Map<String, Integer> opponentCardCounts,
+            String hudAlert,
+            Set<String> disconnectedOpponents) {
 
         StringBuilder sb = new StringBuilder();
         sb.append("============================================================\n");
@@ -168,14 +181,22 @@ public class TerminalRenderer {
             sb.append("  Przeciwnicy:       ");
             opponentCardCounts.forEach((name, count) -> {
                 if (!name.equalsIgnoreCase(myUsername)) {
+                    boolean isDisc = disconnectedOpponents != null
+                            && disconnectedOpponents.stream().anyMatch(d -> d.equalsIgnoreCase(name));
+                    String discTag = "";
+                    if (isDisc) {
+                        discTag = ansiEnabled
+                                ? (" " + FG_YELLOW + BOLD + "[DISCONNECTED - 2m grace]" + RESET)
+                                : " [DISCONNECTED - 2m grace]";
+                    }
                     if (count == 1) {
                         if (ansiEnabled) {
-                            sb.append(name).append(" (").append(FG_RED).append(BOLD).append("1 KARTA! [catch ").append(name).append("]").append(RESET).append(")  ");
+                            sb.append(name).append(discTag).append(" (").append(FG_RED).append(BOLD).append("1 KARTA! [catch ").append(name).append("]").append(RESET).append(")  ");
                         } else {
-                            sb.append(name).append(" (1 KARTA! [catch ").append(name).append("])  ");
+                            sb.append(name).append(discTag).append(" (1 KARTA! [catch ").append(name).append("])  ");
                         }
                     } else {
-                        sb.append(name).append(" (").append(count).append(" kart)  ");
+                        sb.append(name).append(discTag).append(" (").append(count).append(" kart)  ");
                     }
                 }
             });

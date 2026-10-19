@@ -992,5 +992,73 @@ public class UltimoEngine {
     public List<ServerEvent.Placement> getMatchStandings() {
         return Collections.unmodifiableList(matchStandings);
     }
+
+    /**
+     * Test harness setup: prepares hands and discard pile for tactical action defense testing
+     * (Draw Stacking and Skip Deflection).
+     */
+    public synchronized void setupDefenseScenario() {
+        if (!isGameStarted || players.size() < 4) {
+            return;
+        }
+        this.deck = Deck.createDeckForPlayerCount(this.players.size(), random);
+        this.discardPile = new DiscardPile();
+        this.discardPile.playCard(new Card(CardColor.RED, CardValue.FIVE), CardColor.RED);
+        this.pendingSkipDeflection = false;
+        this.skipTarget = null;
+        this.pendingDrawPenalty = 0;
+        this.pendingDrawType = null;
+        this.drawTarget = null;
+        this.hasDrawnThisTurn = false;
+        this.turnManager.reset(players.get(0));
+
+        for (int i = 0; i < players.size(); i++) {
+            Player p = players.get(i);
+            p.getHand().clear();
+            p.setPlacementRank(0);
+            if (i == 0) {
+                p.getHand().addCard(new Card(CardColor.RED, CardValue.DRAW_TWO));
+                p.getHand().addCard(new Card(CardColor.RED, CardValue.SKIP));
+                p.getHand().addCard(new Card(CardColor.RED, CardValue.ONE));
+            } else if (i == 1) {
+                p.getHand().addCard(new Card(CardColor.BLUE, CardValue.DRAW_TWO));
+                p.getHand().addCard(new Card(CardColor.BLUE, CardValue.SKIP));
+                p.getHand().addCard(new Card(CardColor.BLUE, CardValue.TWO));
+            } else {
+                p.getHand().addCard(new Card(CardColor.GREEN, CardValue.ONE));
+                p.getHand().addCard(new Card(CardColor.YELLOW, CardValue.TWO));
+            }
+        }
+    }
+
+    /**
+     * Test harness setup: prepares hands and discard pile for Last-Man-Standing podium verification.
+     * All players are given exactly 1 playable card, and turn is reset to player 0.
+     */
+    public synchronized void setupPodiumScenario() {
+        if (!isGameStarted || players.isEmpty()) {
+            return;
+        }
+        this.discardPile = new DiscardPile();
+        this.discardPile.playCard(new Card(CardColor.RED, CardValue.ONE), CardColor.RED);
+        this.pendingSkipDeflection = false;
+        this.skipTarget = null;
+        this.pendingDrawPenalty = 0;
+        this.pendingDrawType = null;
+        this.drawTarget = null;
+        this.hasDrawnThisTurn = false;
+        this.nextRank = 1;
+        this.finishedPlayers.clear();
+        this.matchStandings.clear();
+        this.winner = null;
+        this.isGameOver = false;
+        this.turnManager.reset(players.get(0));
+
+        for (Player p : players) {
+            p.getHand().clear();
+            p.setPlacementRank(0);
+            p.getHand().addCard(new Card(CardColor.RED, CardValue.ONE));
+        }
+    }
 }
 
