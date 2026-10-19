@@ -95,7 +95,7 @@ public class ServerApp implements ConnectionListener {
     }
 
     /**
-     * Executes the Google SRE / Cloud Run coordinated graceful shutdown sequence:
+     * Executes the SRE / Cloud Run coordinated graceful shutdown sequence:
      * 1. Marks readiness probe as 503 to drop load balancer ingress.
      * 2. Closes SocketAcceptor to reject any incoming TCP handshakes.
      * 3. Broadcasts SERVER_SHUTDOWN <drainSeconds> to all active client sessions.

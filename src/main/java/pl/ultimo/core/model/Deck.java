@@ -122,6 +122,12 @@ public class Deck {
         return Optional.ofNullable(cards.pollFirst());
     }
 
+    public void pushTop(Card card) {
+        if (card != null) {
+            cards.addFirst(card);
+        }
+    }
+
     public void replenishFromDiscard(List<Card> recycledCards) {
         if (recycledCards == null || recycledCards.isEmpty()) {
             return;

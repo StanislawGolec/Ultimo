@@ -11,8 +11,8 @@ if %ERRORLEVEL% neq 0 (
     exit /b 1
 )
 
-echo Executing EcosystemIntegrationTest and ChaosResilienceSimulationTest...
-java "-Djdk.tracePinnedThreads=full" -jar .tools/junit-platform-console-standalone-1.10.2.jar execute --class-path "target/classes;target/test-classes" --select-class pl.ultimo.server.net.EcosystemIntegrationTest --select-class pl.ultimo.server.net.ChaosResilienceSimulationTest
+echo Executing EcosystemIntegrationTest, ChaosResilienceSimulationTest, and MultiAgentGameplayIntegrationTest...
+java "-Djdk.tracePinnedThreads=full" -jar .tools/junit-platform-console-standalone-1.10.2.jar execute --class-path "target/classes;target/test-classes" --select-class pl.ultimo.server.net.EcosystemIntegrationTest --select-class pl.ultimo.server.net.ChaosResilienceSimulationTest --select-class pl.ultimo.server.net.MultiAgentGameplayIntegrationTest
 if %ERRORLEVEL% neq 0 (
     echo Ecosystem integration test failed!
     exit /b 1

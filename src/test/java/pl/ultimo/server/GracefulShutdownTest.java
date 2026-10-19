@@ -27,7 +27,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-@DisplayName("Google SRE Graceful Shutdown & Health Probe Lifecycle Tests")
+@DisplayName("Production SRE Graceful Shutdown & Health Probe Lifecycle Tests")
 class GracefulShutdownTest {
 
     private ServerApp serverApp;

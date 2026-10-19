@@ -12,8 +12,8 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
-Write-Host "Executing EcosystemIntegrationTest and ChaosResilienceSimulationTest..." -ForegroundColor Yellow
-java "-Djdk.tracePinnedThreads=full" -jar .tools/junit-platform-console-standalone-1.10.2.jar execute --class-path "target/classes;target/test-classes" --select-class pl.ultimo.server.net.EcosystemIntegrationTest --select-class pl.ultimo.server.net.ChaosResilienceSimulationTest
+Write-Host "Executing EcosystemIntegrationTest, ChaosResilienceSimulationTest, and MultiAgentGameplayIntegrationTest..." -ForegroundColor Yellow
+java "-Djdk.tracePinnedThreads=full" -jar .tools/junit-platform-console-standalone-1.10.2.jar execute --class-path "target/classes;target/test-classes" --select-class pl.ultimo.server.net.EcosystemIntegrationTest --select-class pl.ultimo.server.net.ChaosResilienceSimulationTest --select-class pl.ultimo.server.net.MultiAgentGameplayIntegrationTest
 
 if ($LASTEXITCODE -ne 0) {
     Write-Error "Ecosystem integration tests failed with exit code $LASTEXITCODE"

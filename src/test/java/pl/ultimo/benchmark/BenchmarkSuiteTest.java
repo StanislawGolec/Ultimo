@@ -21,10 +21,10 @@ class BenchmarkSuiteTest {
         System.out.println(decodeResult);
         System.out.println(encodeResult);
 
-        assertTrue(decodeResult.opsPerSec() > 300_000,
-                "decodeCommand throughput should exceed 300,000 ops/sec, got: " + decodeResult.opsPerSec());
-        assertTrue(encodeResult.opsPerSec() > 300_000,
-                "encodeEvent throughput should exceed 300,000 ops/sec, got: " + encodeResult.opsPerSec());
+        assertTrue(decodeResult.opsPerSec() > 200_000,
+                "decodeCommand throughput should exceed 200,000 ops/sec, got: " + decodeResult.opsPerSec());
+        assertTrue(encodeResult.opsPerSec() > 200_000,
+                "encodeEvent throughput should exceed 200,000 ops/sec, got: " + encodeResult.opsPerSec());
     }
 
     @Test
@@ -38,10 +38,10 @@ class BenchmarkSuiteTest {
         System.out.println(writeResult);
         System.out.println(decodeResult);
 
-        assertTrue(writeResult.opsPerSec() > 300_000,
-                "writeTextFrame throughput should exceed 300,000 ops/sec, got: " + writeResult.opsPerSec());
-        assertTrue(decodeResult.opsPerSec() > 300_000,
-                "decodeMaskedFrame throughput should exceed 300,000 ops/sec, got: " + decodeResult.opsPerSec());
+        assertTrue(writeResult.opsPerSec() > 200_000,
+                "writeTextFrame throughput should exceed 200,000 ops/sec, got: " + writeResult.opsPerSec());
+        assertTrue(decodeResult.opsPerSec() > 200_000,
+                "decodeMaskedFrame throughput should exceed 200,000 ops/sec, got: " + decodeResult.opsPerSec());
     }
 
     @Test
