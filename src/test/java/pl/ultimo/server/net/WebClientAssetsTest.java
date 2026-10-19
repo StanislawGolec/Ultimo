@@ -163,4 +163,30 @@ class WebClientAssetsTest {
         assertTrue(html.contains("id=\"intermissionScoresList\""), "Modal must display cumulative tournament scores list");
         assertTrue(html.contains("showRoundIntermissionModal("), "JS must invoke showRoundIntermissionModal on in-progress ROUND_OVER");
     }
+
+    @Test
+    @DisplayName("Web client must enforce strict Action Defense card playable restrictions and UI button state")
+    void webClientEnforcesActionDefendingCardRestrictionsAndUI() {
+        String html = WebClientAssets.INDEX_HTML;
+
+        // isPlayableCard defense filtering
+        assertTrue(html.contains("if (defenseStateActive && currentDefenseTarget === myUsername)"),
+                "isPlayableCard must check active defense against current player");
+        assertTrue(html.contains("currentDefenseType === 'SKIP'"),
+                "isPlayableCard must handle SKIP defense");
+        assertTrue(html.contains("currentDefenseType === 'DRAW_TWO'"),
+                "isPlayableCard must handle DRAW_TWO defense");
+        assertTrue(html.contains("currentDefenseType === 'WILD_DRAW_FOUR'"),
+                "isPlayableCard must handle WILD_DRAW_FOUR defense");
+
+        // isComboPlayable defense filtering
+        assertTrue(html.contains("return tokens.every(t => isPlayableCard(t));"),
+                "isComboPlayable must require all combo cards to pass isPlayableCard during active defense");
+
+        // pass and draw button enablements during defense
+        assertTrue(html.contains("drawBtn.disabled = false;"),
+                "updateTurnUI must enable drawBtn during active defense");
+        assertTrue(html.contains("passBtn.disabled = false;"),
+                "updateTurnUI must enable passBtn during active defense");
+    }
 }

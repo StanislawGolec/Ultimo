@@ -1223,4 +1223,78 @@ class GameRoomTest {
         assertEquals(RoomState.FINISHED, room.getState(), "Two heuristic bots should autonomously complete the match");
         room.stop();
     }
+
+    @Test
+    @DisplayName("Illegal defense card plays forfeit turn and immediately broadcast updated game state to avoid turn desync")
+    void illegalDefensePlayForfeitsTurnAndBroadcastsGameState() throws Exception {
+        GameRoom room = new GameRoom("room-defense-sync", 2);
+        room.setTargetScore(500);
+        executor.submit(room);
+
+        TestClient alice = createTestClient("s-1", "Alice");
+        TestClient bob = createTestClient("s-2", "Bob");
+
+        room.addPlayer(alice.session, "Alice");
+        room.addPlayer(bob.session, "Bob");
+        assertEquals(RoomState.IN_PROGRESS, room.getState());
+
+        UltimoEngine engine = room.getEngine();
+        Player p1 = engine.getTurnManager().getCurrentPlayer();
+        TestClient c1 = p1.getUsername().equals("Alice") ? alice : bob;
+        TestClient c2 = p1.getUsername().equals("Alice") ? bob : alice;
+        Player p2 = engine.getPlayers().stream().filter(p -> !p.equals(p1)).findFirst().orElseThrow();
+
+        // Setup a pending SKIP scenario onto p2: p1 plays a SKIP card
+        CardColor color = engine.getDiscardPile().getActiveColor();
+        Card skipCard = new Card(color, CardValue.SKIP);
+        p1.getHand().clear();
+        p1.getHand().addCard(skipCard);
+        p1.getHand().addCard(new Card(color, CardValue.NINE));
+
+        room.enqueueCommand(c1.session, new ClientCommand.Play(skipCard, null));
+        Thread.sleep(80);
+        c1.drainEvents();
+        c2.drainEvents();
+
+        // p2 is now the active player under pending skip defense
+        assertEquals(p2, engine.getTurnManager().getCurrentPlayer());
+        assertTrue(engine.isPendingSkipDeflection());
+        assertEquals(p2, engine.getSkipTarget());
+
+        // Give p2 a non-skip card (e.g. color FOUR) and attempt to play it
+        p2.getHand().clear();
+        Card illegalCard = new Card(color, CardValue.FOUR);
+        p2.getHand().addCard(illegalCard);
+        p2.getHand().addCard(new Card(color, CardValue.EIGHT));
+
+        room.enqueueCommand(c2.session, new ClientCommand.Play(illegalCard, null));
+        Thread.sleep(80);
+
+        List<ServerEvent> c2Events = c2.drainEvents();
+        List<ServerEvent> c1Events = c1.drainEvents();
+
+        // p2 should have received an ErrorEvent for illegal defense forfeit
+        assertTrue(c2Events.stream().anyMatch(e -> e instanceof ServerEvent.ErrorEvent err
+                && err.errorMessage().contains("Must defend with a SKIP card")),
+                "c2 must receive error informing that turn was forfeited");
+
+        // Engine must have advanced turn back to p1
+        assertEquals(p1, engine.getTurnManager().getCurrentPlayer(),
+                "TurnManager must have advanced turn to next player after defense forfeit");
+
+        // Both c1 and c2 MUST have received a new TurnAnnounced with p1's username!
+        assertTrue(c2Events.stream().anyMatch(e -> e instanceof ServerEvent.TurnAnnounced ta
+                && ta.activePlayerName().equals(p1.getUsername())),
+                "c2 must receive TurnAnnounced for p1 after forfeit");
+        assertTrue(c1Events.stream().anyMatch(e -> e instanceof ServerEvent.TurnAnnounced ta
+                && ta.activePlayerName().equals(p1.getUsername())),
+                "c1 must receive TurnAnnounced for p1 after forfeit");
+
+        // Defense state must have been cleared and broadcast as NONE
+        assertTrue(c2Events.stream().anyMatch(e -> e instanceof ServerEvent.ActionDefenseState ads
+                && ads.defenseType() == null && ads.accumulatedPenalty() == 0),
+                "Defense state must be broadcast as NONE after skip is accepted/forfeited");
+
+        room.stop();
+    }
 }

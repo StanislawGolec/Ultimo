@@ -373,6 +373,18 @@ public class GameRoom implements Runnable {
                     session.sendEvent(new ServerEvent.OpponentUpdate(other.getUsername(), other.getHand().size()));
                 }
             }
+
+            if (engine.isActionDefendingEnabled()) {
+                if (engine.getPendingDrawPenalty() > 0) {
+                    String target = engine.getDrawTarget() != null ? engine.getDrawTarget().getUsername() : "-";
+                    session.sendEvent(new ServerEvent.ActionDefenseState(engine.getPendingDrawType(), engine.getPendingDrawPenalty(), target));
+                } else if (engine.isPendingSkipDeflection()) {
+                    String target = engine.getSkipTarget() != null ? engine.getSkipTarget().getUsername() : "-";
+                    session.sendEvent(new ServerEvent.ActionDefenseState(CardValue.SKIP, 1, target));
+                } else {
+                    session.sendEvent(new ServerEvent.ActionDefenseState(null, 0, "-"));
+                }
+            }
         }
 
         broadcast(new ServerEvent.ChatBroadcast("GAME", existingPlayer.getUsername() + " has reconnected!"));
@@ -806,6 +818,11 @@ public class GameRoom implements Runnable {
         UltimoEngine.PlayResult result = engine.playCards(player, play.cards(), play.chosenWildColor());
         if (!result.success()) {
             session.sendEvent(new ServerEvent.ErrorEvent(result.errorMessage()));
+            if (engine.getTurnManager() != null && engine.getTurnManager().getCurrentPlayer() != null
+                    && !player.equals(engine.getTurnManager().getCurrentPlayer())) {
+                turnStartedTimestamp = System.currentTimeMillis();
+                broadcastGameState();
+            }
             return;
         }
 
@@ -1061,6 +1078,18 @@ public class GameRoom implements Runnable {
         // 1. Public table state
         broadcast(new ServerEvent.TopCard(snapshot.topCard(), snapshot.activeColor()));
         broadcast(new ServerEvent.TurnAnnounced(snapshot.activePlayerName()));
+
+        if (engine.isActionDefendingEnabled()) {
+            if (engine.getPendingDrawPenalty() > 0) {
+                String target = engine.getDrawTarget() != null ? engine.getDrawTarget().getUsername() : "-";
+                broadcast(new ServerEvent.ActionDefenseState(engine.getPendingDrawType(), engine.getPendingDrawPenalty(), target));
+            } else if (engine.isPendingSkipDeflection()) {
+                String target = engine.getSkipTarget() != null ? engine.getSkipTarget().getUsername() : "-";
+                broadcast(new ServerEvent.ActionDefenseState(CardValue.SKIP, 1, target));
+            } else {
+                broadcast(new ServerEvent.ActionDefenseState(null, 0, "-"));
+            }
+        }
 
         // 2. Secret hand update and opponent counts
         record HandDelivery(ClientSession session, List<Card> handCards, List<ServerEvent.OpponentUpdate> oppUpdates) {}

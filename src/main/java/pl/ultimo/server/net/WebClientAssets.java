@@ -367,6 +367,9 @@ public final class WebClientAssets {
     let turnTimeoutMs = 0;
     let turnDeadlineMs = 0;
     let defenseStateActive = false;
+    let currentDefenseType = null;
+    let currentDefensePenalty = 0;
+    let currentDefenseTarget = null;
     const opponentCounts = new Map();
     const disconnectedOpponents = new Set();
     const playerGraceSeconds = new Map();
@@ -910,14 +913,8 @@ public final class WebClientAssets {
           discardCardContainer.appendChild(createCardElement(currentTopCard, currentActiveColor));
 
           if (!defenseStateActive) {
-            if (currentTopCard && (currentTopCard.includes('DRAW_TWO') || currentTopCard.includes('DRAW_FOUR'))) {
-              const count = currentTopCard.includes('FOUR') ? 4 : 2;
-              actionHudBanner.className = 'action-hud-banner stack';
-              actionHudBanner.textContent = `⚠️ PENALTY STACK: +${count} CARDS! Play a Draw card to defend or click Draw to take penalty.`;
-              actionHudBanner.style.display = 'block';
-            } else if (!actionHudBanner.className.includes('deflect')) {
-              actionHudBanner.style.display = 'none';
-            }
+            actionHudBanner.className = 'action-hud-banner';
+            actionHudBanner.style.display = 'none';
           }
 
           updateTurnUI();
@@ -946,22 +943,42 @@ public final class WebClientAssets {
         }
 
         case 'DEFENSE_STATE': {
-          defenseStateActive = true;
           const defType = (parts[1] || 'NONE').toUpperCase();
           const penaltyCount = parseInt(parts[2], 10) || 0;
           const targetPlayer = parts[3] || '';
           if ((defType === 'DRAW_TWO' || defType === 'WILD_DRAW_FOUR') && penaltyCount > 0) {
+            defenseStateActive = true;
+            currentDefenseType = defType;
+            currentDefensePenalty = penaltyCount;
+            currentDefenseTarget = targetPlayer;
             actionHudBanner.className = 'action-hud-banner stack';
-            actionHudBanner.textContent = `⚠️ PENALTY STACK: +${penaltyCount} CARDS! Play a Draw card to defend or click Draw to take penalty.`;
+            if (targetPlayer === myUsername) {
+              actionHudBanner.textContent = `⚠️ PENALTY STACK: +${penaltyCount} CARDS! Play a Draw card to defend or click Draw/Pass to accept penalty.`;
+            } else {
+              actionHudBanner.textContent = `⚠️ PENALTY STACK: +${penaltyCount} CARDS on ${targetPlayer}! Defending...`;
+            }
             actionHudBanner.style.display = 'block';
           } else if (defType === 'SKIP') {
+            defenseStateActive = true;
+            currentDefenseType = 'SKIP';
+            currentDefensePenalty = 1;
+            currentDefenseTarget = targetPlayer;
             actionHudBanner.className = 'action-hud-banner deflect';
-            actionHudBanner.textContent = `🛡️ SKIP DEFLECTED! Shifted to ${targetPlayer}!`;
+            if (targetPlayer === myUsername) {
+              actionHudBanner.textContent = `🛡️ SKIP DEFLECTED! Incoming on you: Play SKIP to deflect or click Pass/Draw to accept.`;
+            } else {
+              actionHudBanner.textContent = `🛡️ SKIP DEFLECTED! Shifted to ${targetPlayer}! Defending...`;
+            }
             actionHudBanner.style.display = 'block';
           } else {
+            defenseStateActive = false;
+            currentDefenseType = null;
+            currentDefensePenalty = 0;
+            currentDefenseTarget = null;
             actionHudBanner.className = 'action-hud-banner';
             actionHudBanner.style.display = 'none';
           }
+          updateTurnUI();
           break;
         }
 
@@ -1031,6 +1048,14 @@ public final class WebClientAssets {
 
         case 'GAME_OVER': {
           const winner = parts[1];
+          defenseStateActive = false;
+          currentDefenseType = null;
+          currentDefensePenalty = 0;
+          currentDefenseTarget = null;
+          if (actionHudBanner) {
+            actionHudBanner.className = 'action-hud-banner';
+            actionHudBanner.style.display = 'none';
+          }
           stopTurnCountdown();
           closeIntermissionModal();
           logMessage(`★ GAME OVER! Winner: ${winner} ★`, 'win');
@@ -1050,6 +1075,14 @@ public final class WebClientAssets {
           const status = parts[3];
           const scoresToken = parts[4] || '';
           currentRoundNumber++;
+          defenseStateActive = false;
+          currentDefenseType = null;
+          currentDefensePenalty = 0;
+          currentDefenseTarget = null;
+          if (actionHudBanner) {
+            actionHudBanner.className = 'action-hud-banner';
+            actionHudBanner.style.display = 'none';
+          }
           stopTurnCountdown();
           logMessage(`Round ${currentRoundNumber} Over! Winner: ${winner} (+${pts} pts)`, 'win');
           if (status === 'WON') {
@@ -1067,6 +1100,14 @@ public final class WebClientAssets {
           if (errMsg.includes('kicked')) {
             alert('You have been kicked from the room by the host.');
             gameStarted = false;
+            defenseStateActive = false;
+            currentDefenseType = null;
+            currentDefensePenalty = 0;
+            currentDefenseTarget = null;
+            if (actionHudBanner) {
+              actionHudBanner.className = 'action-hud-banner';
+              actionHudBanner.style.display = 'none';
+            }
             stopTurnCountdown();
             startBtn.style.display = 'none';
             if (addBotBtn) addBotBtn.style.display = 'none';
@@ -1151,6 +1192,21 @@ public final class WebClientAssets {
 
     function isPlayableCard(token) {
       if (!gameStarted || !myUsername || currentTurnPlayer !== myUsername || !token || isPlayerFinished) return false;
+
+      if (defenseStateActive && currentDefenseTarget === myUsername) {
+        const val = getCardValue(token);
+        if (currentDefenseType === 'SKIP') {
+          return val === 'SKIP';
+        }
+        if (currentDefenseType === 'DRAW_TWO') {
+          return val === 'DRAW_TWO' || val === 'WILD_DRAW_FOUR';
+        }
+        if (currentDefenseType === 'WILD_DRAW_FOUR' || currentDefenseType === 'DRAW_FOUR') {
+          return val === 'WILD_DRAW_FOUR';
+        }
+        return false;
+      }
+
       if (token.startsWith('WILD')) return true;
 
       const sep = token.indexOf('_');
@@ -1190,12 +1246,30 @@ public final class WebClientAssets {
 
       if (myUsername && currentTurnPlayer === myUsername) {
         turnBanner.className = 'turn-banner my-turn';
-        turnBanner.textContent = `★ YOUR TURN! (${currentActiveColor} active) ★`;
-        drawBtn.disabled = hasDrawnThisTurn;
-        passBtn.disabled = !hasDrawnThisTurn;
+        if (defenseStateActive && currentDefenseTarget === myUsername) {
+          if (currentDefenseType === 'SKIP') {
+            turnBanner.textContent = `🛡️ DEFEND SKIP (Play SKIP or Pass/Draw to accept)`;
+          } else {
+            turnBanner.textContent = `⚠️ DEFEND PENALTY (+${currentDefensePenalty} cards or Draw/Pass to accept)`;
+          }
+          drawBtn.disabled = false;
+          passBtn.disabled = false;
+        } else {
+          turnBanner.textContent = `★ YOUR TURN! (${currentActiveColor} active) ★`;
+          drawBtn.disabled = hasDrawnThisTurn;
+          passBtn.disabled = !hasDrawnThisTurn;
+        }
       } else {
         turnBanner.className = 'turn-banner';
-        turnBanner.textContent = `Turn: ${currentTurnPlayer} | Active Color: ${currentActiveColor}`;
+        if (defenseStateActive && currentDefenseTarget && currentDefenseTarget !== '-') {
+          if (currentDefenseType === 'SKIP') {
+            turnBanner.textContent = `🛡️ Turn: ${currentTurnPlayer} (Defending Skip)`;
+          } else {
+            turnBanner.textContent = `⚠️ Turn: ${currentTurnPlayer} (Defending +${currentDefensePenalty} Stack)`;
+          }
+        } else {
+          turnBanner.textContent = `Turn: ${currentTurnPlayer} | Active Color: ${currentActiveColor}`;
+        }
         drawBtn.disabled = true;
         passBtn.disabled = true;
       }
@@ -1241,6 +1315,9 @@ public final class WebClientAssets {
       const firstVal = getCardValue(tokens[0]);
       const allSameVal = tokens.every(t => getCardValue(t) === firstVal);
       if (!allSameVal) return false;
+      if (defenseStateActive && currentDefenseTarget === myUsername) {
+        return tokens.every(t => isPlayableCard(t));
+      }
       return tokens.some(t => isPlayableCard(t));
     }
 
@@ -1376,10 +1453,14 @@ public final class WebClientAssets {
     function selectWildColor(color) {
       if (pendingWildCards && pendingWildCards.length > 0) {
         hasDrawnThisTurn = false;
+        selectedIndices.clear();
+        updatePlayBtnUI();
         sendCommand(`PLAY ${pendingWildCards.join(',')} ${color}`);
         pendingWildCards = null;
       } else if (pendingWildCard) {
         hasDrawnThisTurn = false;
+        selectedIndices.clear();
+        updatePlayBtnUI();
         sendCommand(`PLAY ${pendingWildCard} ${color}`);
         pendingWildCard = null;
       }
