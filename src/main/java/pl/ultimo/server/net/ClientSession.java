@@ -6,12 +6,10 @@ import pl.ultimo.protocol.ProtocolException;
 import pl.ultimo.protocol.ServerEvent;
 import pl.ultimo.server.metrics.MetricsRegistry;
 
-import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
@@ -85,7 +83,13 @@ public class ClientSession implements Runnable, Closeable {
     @Override
     public void run() {
         try {
-            String firstLine = readAsciiLine(rawInputStream);
+            String firstLine;
+            try {
+                firstLine = readBoundedLine();
+            } catch (FrameTooLongException ftle) {
+                handleFrameTooLong();
+                return;
+            }
             if (firstLine == null) {
                 return;
             }
@@ -135,7 +139,16 @@ public class ClientSession implements Runnable, Closeable {
     private void handleHttpOrWebSocket(String requestLine) throws IOException {
         Map<String, String> headers = new HashMap<>();
         String headerLine;
-        while ((headerLine = readAsciiLine(rawInputStream)) != null && !headerLine.isEmpty()) {
+        while (true) {
+            try {
+                headerLine = readBoundedLine();
+            } catch (FrameTooLongException ftle) {
+                handleFrameTooLong();
+                return;
+            }
+            if (headerLine == null || headerLine.isEmpty()) {
+                break;
+            }
             int colon = headerLine.indexOf(':');
             if (colon > 0) {
                 String key = headerLine.substring(0, colon).trim().toLowerCase(Locale.ROOT);
@@ -186,7 +199,6 @@ public class ClientSession implements Runnable, Closeable {
         int statusCode = 200;
         String statusText = "OK";
 
-        boolean triggerShutdown = false;
         if (path.equals("/metrics")) {
             body = MetricsRegistry.getInstance().toPrometheusText().getBytes(StandardCharsets.UTF_8);
             contentType = "text/plain; version=0.0.4; charset=utf-8";
@@ -203,10 +215,6 @@ public class ClientSession implements Runnable, Closeable {
                 statusCode = 503;
                 statusText = "Service Unavailable";
             }
-        } else if (path.equals("/shutdown")) {
-            body = "Shutting down\n".getBytes(StandardCharsets.UTF_8);
-            contentType = "text/plain";
-            triggerShutdown = true;
         } else {
             body = WebClientAssets.getHtmlBytes();
             contentType = "text/html; charset=UTF-8";
@@ -226,10 +234,6 @@ public class ClientSession implements Runnable, Closeable {
             writeLock.unlock();
         }
         close();
-
-        if (triggerShutdown) {
-            listener.onShutdownRequested();
-        }
     }
 
     private void runWebSocketLoop() {
@@ -313,11 +317,10 @@ public class ClientSession implements Runnable, Closeable {
     private void handleTcpConnection(String firstLine) throws IOException {
         processCommandLine(firstLine);
 
-        BufferedReader reader = new BufferedReader(new InputStreamReader(rawInputStream, StandardCharsets.UTF_8));
         while (!isClosed.get()) {
             String line;
             try {
-                line = reader.readLine();
+                line = readBoundedLine();
             } catch (SocketTimeoutException e) {
                 if (idleTimeoutMillis > 0) {
                     consecutiveTimeouts++;
@@ -325,9 +328,12 @@ public class ClientSession implements Runnable, Closeable {
                         System.out.println("Session " + sessionId + " idle timeout exceeded without heartbeat. Closing.");
                         break;
                     }
-                    sendEvent(new ServerEvent.Pong());
+                    sendTcpPingProbe();
                 }
                 continue;
+            } catch (FrameTooLongException ftle) {
+                handleFrameTooLong();
+                break;
             }
 
             if (line == null) {
@@ -345,13 +351,74 @@ public class ClientSession implements Runnable, Closeable {
         }
     }
 
+    private void sendTcpPingProbe() {
+        writeLock.lock();
+        try {
+            if (!isClosed.get()) {
+                rawOutputStream.write("PING\n".getBytes(StandardCharsets.UTF_8));
+                rawOutputStream.flush();
+            }
+        } catch (IOException e) {
+            close();
+        } finally {
+            writeLock.unlock();
+        }
+    }
+
+    private void handleFrameTooLong() {
+        MetricsRegistry.getInstance().recordError("FRAME_TOO_LONG");
+        writeLock.lock();
+        try {
+            if (!isClosed.get()) {
+                rawOutputStream.write("ERROR FRAME_TOO_LONG: Frame length exceeds 8192 bytes\n".getBytes(StandardCharsets.UTF_8));
+                rawOutputStream.flush();
+            }
+        } catch (IOException ignored) {
+        } finally {
+            writeLock.unlock();
+        }
+        close();
+    }
+
     private void processCommandLine(String line) {
+        if ("PONG".equalsIgnoreCase(line.trim())) {
+            consecutiveTimeouts = 0;
+            lastActivityMillis.set(System.currentTimeMillis());
+            return;
+        }
         try {
             ClientCommand command = ProtocolCodec.decodeCommand(line);
+            if (command instanceof ClientCommand.Quit) {
+                handleQuit(command);
+                return;
+            }
             listener.onCommandReceived(this, command);
         } catch (ProtocolException pe) {
             MetricsRegistry.getInstance().recordError("PROTOCOL_ERROR");
             sendEvent(new ServerEvent.ErrorEvent("Protocol error: " + pe.getMessage()));
+        }
+    }
+
+    private void handleQuit(ClientCommand command) {
+        try {
+            listener.onCommandReceived(this, command);
+        } finally {
+            writeLock.lock();
+            try {
+                if (!isClosed.get()) {
+                    ServerEvent ack = new ServerEvent.ChatBroadcast("SERVER", "QUIT_ACK");
+                    if (isWebSocket) {
+                        WebSocketFrameCodec.writeTextFrame(rawOutputStream, ProtocolCodec.encodeEvent(ack).trim());
+                    } else {
+                        rawOutputStream.write(ProtocolCodec.encodeEvent(ack).getBytes(StandardCharsets.UTF_8));
+                        rawOutputStream.flush();
+                    }
+                }
+            } catch (IOException ignored) {
+            } finally {
+                writeLock.unlock();
+            }
+            close();
         }
     }
 
@@ -405,21 +472,28 @@ public class ClientSession implements Runnable, Closeable {
         }
     }
 
-    private String readAsciiLine(InputStream in) throws IOException {
-        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+    private String readBoundedLine() throws IOException {
         int b;
-        while ((b = in.read()) != -1) {
+        while ((b = rawInputStream.read()) != -1) {
             if (b == '\n') {
-                break;
+                byte[] bytes = currentLineBuffer.toByteArray();
+                currentLineBuffer.reset();
+                return new String(bytes, StandardCharsets.UTF_8);
             }
             if (b != '\r') {
-                buffer.write(b);
+                currentLineBuffer.write(b);
+                if (currentLineBuffer.size() > MAX_TCP_LINE_LENGTH) {
+                    currentLineBuffer.reset();
+                    throw new FrameTooLongException("Frame length exceeds " + MAX_TCP_LINE_LENGTH + " bytes");
+                }
             }
         }
-        if (b == -1 && buffer.size() == 0) {
+        if (currentLineBuffer.size() == 0) {
             return null;
         }
-        return buffer.toString(StandardCharsets.UTF_8);
+        byte[] bytes = currentLineBuffer.toByteArray();
+        currentLineBuffer.reset();
+        return new String(bytes, StandardCharsets.UTF_8);
     }
 
     public String getSessionId() {

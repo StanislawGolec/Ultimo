@@ -27,6 +27,8 @@ public class MetricsRegistry {
 
     private final AtomicLong activeTcpConnections = new AtomicLong(0);
     private final AtomicLong activeWebSocketConnections = new AtomicLong(0);
+    private final LongAdder totalTcpConnections = new LongAdder();
+    private final LongAdder totalWebSocketConnections = new LongAdder();
     private final AtomicLong fallbackActiveRooms = new AtomicLong(0);
     private volatile Supplier<Integer> activeRoomsSupplier = null;
 
@@ -54,14 +56,17 @@ public class MetricsRegistry {
     public void recordConnectionOpened(boolean isWebSocket) {
         if (isWebSocket) {
             activeWebSocketConnections.incrementAndGet();
+            totalWebSocketConnections.increment();
         } else {
             activeTcpConnections.incrementAndGet();
+            totalTcpConnections.increment();
         }
     }
 
     public void recordWebSocketUpgrade() {
         activeTcpConnections.updateAndGet(val -> Math.max(0, val - 1));
         activeWebSocketConnections.incrementAndGet();
+        totalWebSocketConnections.increment();
     }
 
     public void recordConnectionClosed(boolean isWebSocket) {
@@ -155,9 +160,23 @@ public class MetricsRegistry {
         return latencySum.sum();
     }
 
+    public long getTotalTcpConnections() {
+        return totalTcpConnections.sum();
+    }
+
+    public long getTotalWebSocketConnections() {
+        return totalWebSocketConnections.sum();
+    }
+
+    public long getTotalConnections() {
+        return totalTcpConnections.sum() + totalWebSocketConnections.sum();
+    }
+
     public void reset() {
         activeTcpConnections.set(0);
         activeWebSocketConnections.set(0);
+        totalTcpConnections.reset();
+        totalWebSocketConnections.reset();
         fallbackActiveRooms.set(0);
         activeRoomsSupplier = null;
 
@@ -183,6 +202,12 @@ public class MetricsRegistry {
         sb.append("# TYPE ultimo_active_connections gauge\n");
         sb.append("ultimo_active_connections{transport=\"tcp\"} ").append(activeTcpConnections.get()).append("\n");
         sb.append("ultimo_active_connections{transport=\"websocket\"} ").append(activeWebSocketConnections.get()).append("\n\n");
+
+        // 1b. ultimo_connections_total
+        sb.append("# HELP ultimo_connections_total Total number of client connections accepted.\n");
+        sb.append("# TYPE ultimo_connections_total counter\n");
+        sb.append("ultimo_connections_total{transport=\"tcp\"} ").append(totalTcpConnections.sum()).append("\n");
+        sb.append("ultimo_connections_total{transport=\"websocket\"} ").append(totalWebSocketConnections.sum()).append("\n\n");
 
         // 2. ultimo_active_rooms
         sb.append("# HELP ultimo_active_rooms Current number of active game rooms.\n");

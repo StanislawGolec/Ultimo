@@ -429,6 +429,23 @@ public class TerminalClientApp {
                 }
                 System.out.println("============================================================\n");
             }
+            case ServerEvent.ActionDefenseState ads -> {
+                if (ads.defenseType() == pl.ultimo.core.model.CardValue.DRAW_TWO
+                        || ads.defenseType() == pl.ultimo.core.model.CardValue.WILD_DRAW_FOUR) {
+                    currentHudAlert = "⚠️ PENALTY STACK: +" + ads.accumulatedPenalty() + " CARDS! Target: " + ads.targetPlayer();
+                } else if (ads.defenseType() == pl.ultimo.core.model.CardValue.SKIP) {
+                    currentHudAlert = "🛡️ SKIP DEFLECTION PENDING -> Target: " + ads.targetPlayer();
+                } else {
+                    currentHudAlert = null;
+                }
+            }
+            case ServerEvent.PlayerState ps -> {
+                if ("DISCONNECTED".equalsIgnoreCase(ps.status())) {
+                    disconnectedOpponents.add(ps.username());
+                } else {
+                    disconnectedOpponents.remove(ps.username());
+                }
+            }
             case ServerEvent.Pong ignored -> {}
         }
     }

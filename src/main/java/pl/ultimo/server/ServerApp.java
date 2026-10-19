@@ -28,6 +28,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class ServerApp implements ConnectionListener {
 
     private final ServerConfig config;
+    private final boolean enableTestCommands;
     private final RoomManager roomManager;
     private final ExecutorService sessionExecutor;
     private final Map<String, ClientSession> activeSessions = new ConcurrentHashMap<>();
@@ -37,9 +38,18 @@ public class ServerApp implements ConnectionListener {
     private Thread shutdownHook;
 
     public ServerApp(ServerConfig config) {
+        this(config, false);
+    }
+
+    public ServerApp(ServerConfig config, boolean enableTestCommands) {
         this.config = config;
+        this.enableTestCommands = enableTestCommands;
         this.roomManager = new RoomManager(config);
         this.sessionExecutor = Executors.newVirtualThreadPerTaskExecutor();
+    }
+
+    public boolean isEnableTestCommands() {
+        return enableTestCommands;
     }
 
     public static void main(String[] args) {
@@ -209,6 +219,17 @@ public class ServerApp implements ConnectionListener {
             return;
         }
 
+        if (command.type().name().startsWith("TEST") && !enableTestCommands) {
+            session.sendEvent(new ServerEvent.ErrorEvent("TEST_COMMANDS_DISABLED: Test commands are disabled"));
+            return;
+        }
+
+        if (command instanceof ClientCommand.Quit) {
+            session.sendEvent(new ServerEvent.ChatBroadcast("SERVER", "QUIT_ACK"));
+            session.close();
+            return;
+        }
+
         if (command instanceof ClientCommand.Ping) {
             session.sendEvent(new ServerEvent.Pong());
             return;
@@ -227,10 +248,21 @@ public class ServerApp implements ConnectionListener {
             }
             if (session.getUsername() == null) {
                 session.setUsername("Player-" + session.getSessionId().substring(0, 4));
-                session.sendEvent(new ServerEvent.Welcome(session.getSessionId(), "Welcome to Ultimo, " + session.getUsername() + "!"));
+                session.sendEvent(new ServerEvent.Welcome(session.getSessionId(), session.getSessionId(), "Welcome to Ultimo, " + session.getUsername() + "!"));
             }
             int capacity = create.maxPlayers() != null ? create.maxPlayers() : config.defaultRoomCapacity();
             roomManager.createRoom(session, session.getUsername(), create.name(), create.visibility(), create.accessCode(), capacity);
+            return;
+        }
+
+        if (command instanceof ClientCommand.Reconnect rec) {
+            if (!ProtocolCodec.isValidUsername(rec.username())) {
+                session.sendEvent(new ServerEvent.ErrorEvent("INVALID_USERNAME: Username must be 2-24 characters using word characters and standard symbols"));
+                return;
+            }
+            session.setUsername(rec.username());
+            session.sendEvent(new ServerEvent.Welcome(session.getSessionId(), rec.token(), "Welcome to Ultimo, " + rec.username() + "!"));
+            roomManager.joinRoom(session, rec.username(), rec.roomId(), config.defaultRoomCapacity(), null);
             return;
         }
 
@@ -250,7 +282,7 @@ public class ServerApp implements ConnectionListener {
                 if (targetRoomId != null && !targetRoomId.isBlank()) {
                     if ("LOBBY".equalsIgnoreCase(targetRoomId) || "NONE".equalsIgnoreCase(targetRoomId)) {
                         session.setUsername(join.username());
-                        session.sendEvent(new ServerEvent.Welcome(session.getSessionId(), "Welcome to Ultimo, " + join.username() + "!"));
+                        session.sendEvent(new ServerEvent.Welcome(session.getSessionId(), session.getSessionId(), "Welcome to Ultimo, " + join.username() + "!"));
                         return;
                     }
 
@@ -280,7 +312,7 @@ public class ServerApp implements ConnectionListener {
                 }
 
                 session.setUsername(join.username());
-                session.sendEvent(new ServerEvent.Welcome(session.getSessionId(), "Welcome to Ultimo, " + join.username() + "!"));
+                session.sendEvent(new ServerEvent.Welcome(session.getSessionId(), session.getSessionId(), "Welcome to Ultimo, " + join.username() + "!"));
 
                 int capacity = join.maxPlayers() != null ? join.maxPlayers() : config.defaultRoomCapacity();
                 if (targetRoomId != null && !targetRoomId.isBlank()) {
