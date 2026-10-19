@@ -2,7 +2,7 @@
 
 [![Java Version](https://img.shields.io/badge/Java-21%20LTS-orange.svg)](https://openjdk.org/projects/jdk/21/)
 [![Virtual Threads](https://img.shields.io/badge/Concurrency-Virtual%20Threads%20%28Loom%29-blue.svg)](https://openjdk.org/jeps/444)
-[![Tests](https://img.shields.io/badge/Tests-208%2F208%20Passing%20%28100%25%29-brightgreen.svg)](https://junit.org/junit5/)
+[![Tests](https://img.shields.io/badge/Tests-309%2F309%20Passing%20%28100%25%29-brightgreen.svg)](https://junit.org/junit5/)
 [![WebSockets](https://img.shields.io/badge/WebSockets-RFC%206455%20Pure%20Java-9cf.svg)](#web-client--browser-gameplay)
 [![Dependencies](https://img.shields.io/badge/Runtime%20Dependencies-0%20%28Pure%20Java%20StdLib%29-success.svg)](#architectural-highlights)
 [![Docker](https://img.shields.io/badge/Docker-Multi--stage%20Alpine-2496ED.svg)](https://www.docker.com/)
@@ -50,9 +50,10 @@ An authoritative multiplayer card game server (inspired by Uno) built with **Jav
 
 - **Zero Runtime Frameworks:** Built with the standard Java 21 runtime library (`java.net`, `java.util.concurrent`, `java.io`). No external HTTP, serialization, or networking dependencies.
 - **Virtual Threads (Project Loom):** Every incoming TCP client connection is handled by a lightweight Virtual Thread (`Executors.newVirtualThreadPerTaskExecutor()`), achieving high concurrent connection scalability with minimal OS thread overhead.
-- **Actor-Pattern Concurrency:** Rather than wrapping mutable game state with coarse synchronized blocks or lock contention, each active room executes a dedicated single-threaded event loop fed by a thread-safe `LinkedBlockingQueue`. This eliminates race conditions and deadlocks by design.
+- **Actor-Pattern Concurrency:** Rather than wrapping mutable game state with coarse synchronized blocks or lock contention, each active room executes a dedicated single-threaded event loop driven by a sealed `RoomEnvelope` mailbox (`LinkedBlockingQueue`). This guarantees zero monitor lock contention, zero carrier thread pinning, and deterministic FIFO event processing.
 - **Authoritative Server with Fog of War:** Complete protection against client-side tampering or packet inspection. The server computes all moves, deck shuffles, and penalties. Opponents' cards are withheld; clients receive only their own hand and table metadata.
-- **Custom Line-Delimited Protocol:** Clean, stateless, human-readable text protocol (`\n`-terminated), easily debuggable via Telnet, Netcat, or custom bots.
+- **Custom Line-Delimited Wire Protocol v2:** High-performance, human-readable text protocol (`\n`-terminated) featuring real-time defense state broadcasting, player connection status tags, bounded 8KB line reading, and cryptographic reconnect credentials.
+- **Built-in Autonomous Heuristic AI Bots:** Multi-tier AI opponents (`EASY`, `NORMAL`, `HARD`) executing in-memory on virtual threads without external dependencies or heavy model runners.
 - **Unified Transport Multiplexer & RFC 6455 WebSockets:** A single TCP port multiplexes raw TCP socket connections, RFC 6455 WebSockets, and embedded HTML5 web assets with zero external dependencies.
 - **Cloud-Native & Cross-Platform:** Complete containerization via multi-stage Alpine Dockerfile, Generational ZGC optimization (`-XX:+UseZGC -XX:+ZGenerational`), and native cross-platform runner scripts for Windows (`.bat`) and Linux/macOS (`.sh`).
 
@@ -198,13 +199,14 @@ The protocol is bidirectional, UTF-8 encoded, and line-delimited with `\n`.
 | `CHALLENGE_WILD_FOUR` | _(none)_ | Challenges previous Wild Draw Four play legality | `CHALLENGE_WILD_FOUR` |
 | `CHAT` | `<message>` | Broadcasts a chat message to room participants | `CHAT Good game!` |
 | `PING` | _(none)_ | Heartbeat probe | `PING` |
-| `QUIT` | _(none)_ | Gracefully leaves room and disconnects | `QUIT` |
+| `RECONNECT` | `<username> <room_id> <token>` | Reclaims seat and private hand snapshot within 120s grace period | `RECONNECT Alice room-1 9f8a7c2b...` |
+| `QUIT` | _(none)_ | Gracefully leaves room, closes session, and disconnects | `QUIT` |
 
 ### Server Events
 
 | Event | Format | Description |
 | :--- | :--- | :--- |
-| `WELCOME` | `WELCOME <session_id> <message>` | Acknowledges connection and registration |
+| `WELCOME` | `WELCOME <session_id> <reconnect_token> <message>` | Acknowledges connection and provides cryptographic reconnect credentials |
 | `ROOM_STATUS`| `ROOM_STATUS <roomId> <current> <max> <p1,p2...>` | Broadcasts lobby status and connected players |
 | `ROOM_LIST` | `ROOM_LIST <count> [rooms...]` | Reports available public rooms |
 | `ROOM_OWNER_CHANGED` | `ROOM_OWNER_CHANGED <new_owner>` | Broadcasts host transfer |
@@ -212,6 +214,8 @@ The protocol is bidirectional, UTF-8 encoded, and line-delimited with `\n`.
 | `TURN_ANNOUNCED` | `TURN_ANNOUNCED <active_player_name>` | Announces which player has the current turn |
 | `HAND_UPDATE`| `HAND_UPDATE <card1> <card2> ...` | Sends player's private hand (Fog of War) |
 | `OPPONENT_UPDATE`| `OPPONENT_UPDATE <opponent_name> <count>` | Broadcasts opponent's updated card count |
+| `DEFENSE_STATE` | `DEFENSE_STATE <defense_type> <penalty_cards> <target_player>` | Broadcasts active penalty stack (+2/+4) or skip deflection state |
+| `PLAYER_STATE` | `PLAYER_STATE <username> <CONNECTED\|DISCONNECTED\|RECONNECTED> [grace_sec]` | Broadcasts connection lifecycle status and remaining disconnect grace time |
 | `DRAW_RESULT`| `DRAW_RESULT <card_token>` | Reports card drawn to drawer |
 | `ULTIMO_ANNOUNCED` | `ULTIMO_ANNOUNCED <player_name>` | Broadcasts Ultimo declaration |
 | `CHALLENGE_RESULT` | `CHALLENGE_RESULT <challenger> <target> <GUILTY\|INNOCENT> <draws>` | Challenge outcome |
@@ -327,6 +331,10 @@ pl.ultimo
 │   ├── TerminalClientApp.java       # Interactive CLI client with async event loop
 │   └── TerminalRenderer.java        # ANSI & Plain-text dual-mode card renderer
 ├── core
+│   ├── bot
+│   │   ├── BotAction.java           # Immutable bot action representation
+│   │   ├── BotDecision.java         # Autonomous decision record with thinking latency
+│   │   └── HeuristicBotEngine.java  # Multi-tier heuristic AI strategy engine
 │   ├── engine
 │   │   ├── MoveValidator.java       # Rule validation & legal play verification
 │   │   ├── TurnManager.java         # Clockwise/Counter-clockwise turn logic
@@ -349,6 +357,9 @@ pl.ultimo
     ├── ServerApp.java               # Server bootstrap & connection orchestrator
     ├── config
     │   └── ServerConfig.java        # Server parameters & configuration record
+    ├── metrics
+    │   ├── MetricsExporter.java     # Prometheus text format serialization
+    │   └── MetricsRegistry.java     # Zero-allocation lock-free telemetry registry
     ├── net
     │   ├── ClientSession.java       # Universal TCP/WebSocket virtual-thread session
     │   ├── ConnectionListener.java  # Connection lifecycle event listener
@@ -356,8 +367,10 @@ pl.ultimo
     │   ├── WebClientAssets.java     # Embedded HTML5/CSS/JS single-page web app
     │   └── WebSocketFrameCodec.java # Pure Java RFC 6455 WebSocket frame encoder/decoder
     └── room
-        ├── GameRoom.java            # Room Actor loop with LinkedBlockingQueue mailbox
-        └── RoomManager.java         # Matchmaking & room lifecycle manager
+        ├── GameRoom.java            # Room Actor loop with sealed RoomEnvelope mailbox
+        ├── RoomEnvelope.java        # Sealed message envelope hierarchy
+        ├── RoomManager.java         # Matchmaking & room lifecycle manager
+        └── RoomState.java           # Room lifecycle state machine
 ```
 
 ---
@@ -487,14 +500,16 @@ The repository includes a GitHub Actions matrix workflow ([`.github/workflows/ci
 
 ## Testing & Quality Assurance
 
-The codebase includes **186 automated unit, concurrency, domain, and end-to-end integration tests**:
+The codebase includes **309 automated unit, concurrency, domain, and end-to-end integration tests**:
 
 - **Official Ultimo Rules Extended Tests (30 tests):** Complete tournament scoring up to 500 points, penultimate card `ULTIMO` declarations, `CATCH_ULTIMO` penalties, and `CHALLENGE_WILD_FOUR` bluff legality checks.
+- **Autonomous Heuristic Bot Engine Tests (16 tests):** Tactical card valuation, penalty stack defense, dominant color frequency analysis, challenge heuristics, and virtual-thread bot game loops.
+- **Line-Delimited Protocol v2 & Keepalive Tests (15 tests):** 8KB bounded line reader DoS defense, `DEFENSE_STATE` and `PLAYER_STATE` wire codecs, cryptographic token reconnect, and idle TCP heartbeat keepalive survival exceeding 90 seconds.
 - **Chaos Resilience & Cross-Ecosystem Tests (6 tests):** Network jitter (150-200ms delay), abrupt TCP drops (RST emulation via `soLinger(true, 0)`), targeted room auto-reconnection, and polyglot TCP + WebSocket interoperability.
 - **RFC 6455 WebSocket Security & Fuzzing Tests (40 tests):** Mandatory client frame masking enforcement (Close 1002), 64KB DoS payload limits (Close 1009), control frame size limits, RSV bit validation, and random byte fuzzing stream resilience.
-- **Virtual Thread Concurrency & Pinning Tests (10 tests):** Virtual thread connection scalability, dedicated outbound serializer queues, idle connection watchdog reaper, and zero monitor locks in `pl.ultimo.server`.
+- **Virtual Thread Concurrency & Pinning Tests (10 tests):** Virtual thread connection scalability, sealed `RoomEnvelope` mailbox processing, dedicated outbound serializer queues, idle connection watchdog reaper, and zero monitor locks in `pl.ultimo.server`.
 - **SRE Graceful Shutdown & Health Probe Tests (3 tests):** Coordinated SIGTERM drain sequence, transition of `/ready` to 503, and `SERVER_SHUTDOWN` event broadcasting.
-- **Prometheus Metrics Text Exposition Tests (7 tests):** Lock-free counter/gauge updates, cumulative histogram latency tracking, and valid Prometheus 0.0.4 text format validation.
+- **Prometheus Metrics Text Exposition Tests (7 tests):** Lock-free counter/gauge updates (`ultimo_connections_total`, etc.), cumulative histogram latency tracking, and valid Prometheus 0.0.4 text format validation.
 - **Codec Microbenchmarks & Load Tests (3 tests):** Verification of $>1,000,000$ ops/sec codec throughput and 1,000 concurrent virtual threads under 60MB heap memory.
 
 ```bash
@@ -503,7 +518,7 @@ java "-Djdk.tracePinnedThreads=full" -jar .tools/junit-platform-console-standalo
      execute --class-path "target/classes;target/test-classes" --scan-class-path
 ```
 
-All 186 tests execute cleanly with zero carrier pinning warnings.
+All 309 tests execute cleanly with zero carrier pinning warnings.
 
 ---
 
