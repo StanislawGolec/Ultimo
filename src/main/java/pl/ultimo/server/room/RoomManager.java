@@ -52,6 +52,17 @@ public class RoomManager {
         int targetCapacity = Math.clamp(capacity, GameRoom.MIN_CAPACITY, GameRoom.MAX_CAPACITY);
         matchmakeLock.lock();
         try {
+            // Check if this player is currently disconnected from an active match
+            for (GameRoom room : activeRooms.values()) {
+                if (room.isDisconnected(username)) {
+                    boolean reconnected = room.reconnectPlayer(session, username);
+                    if (reconnected) {
+                        sessionRoomMap.put(session.getSessionId(), room);
+                        return room;
+                    }
+                }
+            }
+
             // Look for an existing public room waiting for players that doesn't already contain this username
             for (GameRoom room : activeRooms.values()) {
                 if (room.getState() == RoomState.WAITING_FOR_PLAYERS && !room.isFull() && !room.isPrivate() && !room.hasPlayer(username)) {
@@ -66,6 +77,7 @@ public class RoomManager {
             // If no available room, spin up a new public room
             String roomId = "room-" + roomCounter.getAndIncrement();
             GameRoom newRoom = new GameRoom(roomId, roomId, RoomVisibility.PUBLIC, null, targetCapacity, new Random(), (sess) -> sessionRoomMap.remove(sess.getSessionId()));
+            newRoom.setOnRoomFinished(r -> activeRooms.remove(r.getRoomId()));
             newRoom.addPlayer(session, username);
 
             activeRooms.put(roomId, newRoom);
@@ -90,6 +102,7 @@ public class RoomManager {
             String roomId = "room-" + roomCounter.getAndIncrement();
             String effectiveName = (roomName != null && !roomName.isBlank()) ? roomName.trim() : roomId;
             GameRoom newRoom = new GameRoom(roomId, effectiveName, visibility, accessCode, targetCapacity, new Random(), (sess) -> sessionRoomMap.remove(sess.getSessionId()));
+            newRoom.setOnRoomFinished(r -> activeRooms.remove(r.getRoomId()));
             newRoom.addPlayer(session, username, accessCode);
 
             activeRooms.put(roomId, newRoom);
@@ -155,8 +168,21 @@ public class RoomManager {
             if (room == null) {
                 RoomVisibility vis = (accessCode != null && !accessCode.isBlank()) ? RoomVisibility.PRIVATE : RoomVisibility.PUBLIC;
                 room = new GameRoom(roomId, roomId, vis, accessCode, targetCapacity, new Random(), (sess) -> sessionRoomMap.remove(sess.getSessionId()));
+                room.setOnRoomFinished(r -> activeRooms.remove(r.getRoomId()));
                 activeRooms.put(roomId, room);
                 roomExecutor.submit(room);
+            }
+
+            if (room.isDisconnected(username)) {
+                if (!room.validateAccess(accessCode)) {
+                    session.sendEvent(new ServerEvent.ErrorEvent("INVALID_ACCESS_CODE: Room is private and requires valid access code"));
+                    return room;
+                }
+                boolean reconnected = room.reconnectPlayer(session, username);
+                if (reconnected) {
+                    sessionRoomMap.put(session.getSessionId(), room);
+                }
+                return room;
             }
 
             if (room.isFull()) {
@@ -211,7 +237,7 @@ public class RoomManager {
         if (room != null) {
             room.handleDisconnect(session);
 
-            if (room.getState() == RoomState.FINISHED || room.getPlayerCount() == 0) {
+            if (room.getState() == RoomState.FINISHED || room.getPlayerCount() == 0 || room.getConnectedSessionCount() == 0) {
                 activeRooms.remove(room.getRoomId());
                 sessionRoomMap.entrySet().removeIf(entry -> entry.getValue().getRoomId().equals(room.getRoomId()));
                 room.stop();

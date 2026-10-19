@@ -235,4 +235,60 @@ class RoomManagerTest {
         assertTrue(roomManager.getRoomForSession("s-dave").isPresent(), "Dave should be enrolled with correct code");
         assertEquals(2, privRoom.getPlayerCount());
     }
+
+    @Test
+    @DisplayName("Immediate empty room reclamation triggers when all player sessions disconnect")
+    void immediateEmptyRoomReclamationWhenAllSessionsDisconnect() throws Exception {
+        ClientSession alice = createDummySession("s-1", "Alice");
+        ClientSession bob = createDummySession("s-2", "Bob");
+
+        GameRoom room = roomManager.matchmake(alice, "Alice", 2);
+        roomManager.matchmake(bob, "Bob", 2);
+        assertEquals(RoomState.IN_PROGRESS, room.getState());
+        assertEquals(1, roomManager.getActiveRoomCount());
+
+        // Alice disconnects - 1 connected session remains, room stays active in grace period
+        roomManager.handleDisconnect(alice);
+        assertEquals(1, roomManager.getActiveRoomCount());
+        assertTrue(room.isDisconnected("Alice"));
+
+        // Bob also disconnects - 0 connected sessions remain, immediate empty room reclamation triggers
+        roomManager.handleDisconnect(bob);
+        assertEquals(0, roomManager.getActiveRoomCount(), "Room should be purged immediately when all sessions disconnect");
+        assertFalse(room.isRunning());
+    }
+
+    @Test
+    @DisplayName("Player reconnects to in-progress match via matchmake or joinRoom")
+    void playerReconnectsViaMatchmakeOrJoinRoom() throws Exception {
+        ClientSession alice1 = createDummySession("s-alice-1", "Alice");
+        ClientSession bob = createDummySession("s-bob", "Bob");
+
+        GameRoom room = roomManager.joinRoom(alice1, "Alice", "custom-reconnect-room", 2, null);
+        roomManager.joinRoom(bob, "Bob", "custom-reconnect-room", 2, null);
+        assertEquals(RoomState.IN_PROGRESS, room.getState());
+
+        // Alice disconnects
+        roomManager.handleDisconnect(alice1);
+        assertTrue(room.isDisconnected("Alice"));
+        assertTrue(roomManager.getRoomForSession("s-alice-1").isEmpty());
+
+        // Alice reconnects via joinRoom
+        ClientSession alice2 = createDummySession("s-alice-2", "Alice");
+        GameRoom rejoinedRoom = roomManager.joinRoom(alice2, "Alice", "custom-reconnect-room", 2, null);
+        assertSame(room, rejoinedRoom);
+        assertFalse(room.isDisconnected("Alice"));
+        assertTrue(roomManager.getRoomForSession("s-alice-2").isPresent());
+
+        // Alice disconnects again
+        roomManager.handleDisconnect(alice2);
+        assertTrue(room.isDisconnected("Alice"));
+
+        // Alice reconnects via matchmake without specifying room ID
+        ClientSession alice3 = createDummySession("s-alice-3", "Alice");
+        GameRoom mmRoom = roomManager.matchmake(alice3, "Alice");
+        assertSame(room, mmRoom);
+        assertFalse(room.isDisconnected("Alice"));
+        assertTrue(roomManager.getRoomForSession("s-alice-3").isPresent());
+    }
 }

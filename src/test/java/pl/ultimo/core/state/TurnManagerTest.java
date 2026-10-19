@@ -87,4 +87,55 @@ class TurnManagerTest {
         assertThrows(IllegalArgumentException.class, () -> new TurnManager(List.of()));
         assertThrows(IllegalArgumentException.class, () -> new TurnManager(null));
     }
+
+    @Test
+    @DisplayName("Removing current player advances turn to next active player")
+    void removingCurrentPlayerAdvancesTurn() {
+        Player alice = new Player("1", "Alice");
+        Player bob = new Player("2", "Bob");
+        Player charlie = new Player("3", "Charlie");
+
+        TurnManager turnManager = new TurnManager(List.of(alice, bob, charlie));
+        assertEquals("Alice", turnManager.getCurrentPlayer().getUsername());
+
+        // Remove Alice who is current
+        boolean wasCurrent = turnManager.removePlayer(alice);
+        assertTrue(wasCurrent);
+        assertEquals(2, turnManager.getPlayerCount());
+        assertEquals("Bob", turnManager.getCurrentPlayer().getUsername());
+
+        // Now Bob takes turn and passes to Charlie
+        turnManager.advanceTurn();
+        assertEquals("Charlie", turnManager.getCurrentPlayer().getUsername());
+
+        // Remove Charlie who is current
+        boolean charlieWasCurrent = turnManager.removePlayer(charlie);
+        assertTrue(charlieWasCurrent);
+        assertEquals(1, turnManager.getPlayerCount());
+        assertEquals("Bob", turnManager.getCurrentPlayer().getUsername());
+    }
+
+    @Test
+    @DisplayName("Removing non-current player preserves active player turn")
+    void removingNonCurrentPlayerPreservesActiveTurn() {
+        Player alice = new Player("1", "Alice");
+        Player bob = new Player("2", "Bob");
+        Player charlie = new Player("3", "Charlie");
+
+        TurnManager turnManager = new TurnManager(List.of(alice, bob, charlie));
+        turnManager.advanceTurn(); // Now Bob is current
+        assertEquals("Bob", turnManager.getCurrentPlayer().getUsername());
+
+        // Remove Alice (who is at index 0, behind current)
+        boolean wasCurrent = turnManager.removePlayer(alice);
+        assertFalse(wasCurrent);
+        assertEquals("Bob", turnManager.getCurrentPlayer().getUsername());
+        assertEquals(2, turnManager.getPlayerCount());
+
+        // Remove Charlie (who is ahead of current)
+        boolean charlieWasCurrent = turnManager.removePlayer(charlie);
+        assertFalse(charlieWasCurrent);
+        assertEquals("Bob", turnManager.getCurrentPlayer().getUsername());
+        assertEquals(1, turnManager.getPlayerCount());
+    }
 }

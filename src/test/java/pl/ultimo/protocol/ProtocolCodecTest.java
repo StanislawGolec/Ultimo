@@ -431,4 +431,45 @@ class ProtocolCodecTest {
         assertEquals(8, join.maxPlayers());
         assertEquals("JOIN Alice room-99 4321 8\n", ProtocolCodec.encodeCommand(join));
     }
+
+    @Test
+    @DisplayName("Should encode and decode PLAYER_FINISHED and MATCH_STANDINGS events")
+    void shouldEncodeAndDecodePlayerFinishedAndMatchStandings() throws ProtocolException {
+        // PLAYER_FINISHED
+        ServerEvent pf = new ServerEvent.PlayerFinished("Alice", 1);
+        String pfWire = ProtocolCodec.encodeEvent(pf);
+        assertEquals("PLAYER_FINISHED Alice 1\n", pfWire);
+
+        ServerEvent decodedPf = ProtocolCodec.decodeEvent(pfWire);
+        assertInstanceOf(ServerEvent.PlayerFinished.class, decodedPf);
+        assertEquals("Alice", ((ServerEvent.PlayerFinished) decodedPf).playerName());
+        assertEquals(1, ((ServerEvent.PlayerFinished) decodedPf).rank());
+
+        // MATCH_STANDINGS with placements
+        List<ServerEvent.Placement> placements = List.of(
+                new ServerEvent.Placement(1, "Alice"),
+                new ServerEvent.Placement(2, "Bob"),
+                new ServerEvent.Placement(3, "Charlie"),
+                new ServerEvent.Placement(4, "David")
+        );
+        ServerEvent ms = new ServerEvent.MatchStandings(placements);
+        String msWire = ProtocolCodec.encodeEvent(ms);
+        assertEquals("MATCH_STANDINGS 1:Alice 2:Bob 3:Charlie 4:David\n", msWire);
+
+        ServerEvent decodedMs = ProtocolCodec.decodeEvent(msWire);
+        assertInstanceOf(ServerEvent.MatchStandings.class, decodedMs);
+        ServerEvent.MatchStandings decodedStandings = (ServerEvent.MatchStandings) decodedMs;
+        assertEquals(4, decodedStandings.placements().size());
+        assertEquals(1, decodedStandings.placements().get(0).rank());
+        assertEquals("Alice", decodedStandings.placements().get(0).playerName());
+        assertEquals(4, decodedStandings.placements().get(3).rank());
+        assertEquals("David", decodedStandings.placements().get(3).playerName());
+
+        // Empty MATCH_STANDINGS
+        ServerEvent emptyMs = new ServerEvent.MatchStandings(List.of());
+        assertEquals("MATCH_STANDINGS -\n", ProtocolCodec.encodeEvent(emptyMs));
+        ServerEvent decodedEmptyMs = ProtocolCodec.decodeEvent("MATCH_STANDINGS -\n");
+        assertInstanceOf(ServerEvent.MatchStandings.class, decodedEmptyMs);
+        assertTrue(((ServerEvent.MatchStandings) decodedEmptyMs).placements().isEmpty());
+    }
 }

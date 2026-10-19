@@ -39,7 +39,7 @@ class GameRoomTest {
     private final List<ServerSocket> serverSocketsToClose = new ArrayList<>();
 
     private record TestClient(ClientSession session, Socket clientSideSocket, BufferedReader reader, List<ServerEvent> receivedEvents) {
-        public void drainEvents() {
+        public List<ServerEvent> drainEvents() {
             try {
                 while (reader.ready()) {
                     String line = reader.readLine();
@@ -50,6 +50,7 @@ class GameRoomTest {
             } catch (Exception e) {
                 // Ignore for drain
             }
+            return receivedEvents;
         }
     }
 
@@ -182,6 +183,10 @@ class GameRoomTest {
     @DisplayName("If all opponents leave in an active match, remaining player wins by forfeit")
     void remainingPlayerWinsByForfeit() throws Exception {
         GameRoom room = new GameRoom("room-forfeit", 2);
+        room.setReconnectGracePeriodMs(50);
+        room.setWatchdogCheckIntervalMs(20);
+        executor.submit(room);
+
         TestClient alice = createTestClient("s-1", "Alice");
         TestClient bob = createTestClient("s-2", "Bob");
 
@@ -192,7 +197,11 @@ class GameRoomTest {
         // Bob disconnects
         room.handleDisconnect(bob.session);
 
-        Thread.sleep(100);
+        // Immediately after disconnect, Bob is in grace period
+        assertTrue(room.isDisconnected("Bob"));
+        assertEquals(RoomState.IN_PROGRESS, room.getState());
+
+        Thread.sleep(160);
         alice.drainEvents();
 
         assertEquals(RoomState.FINISHED, room.getState());
@@ -668,5 +677,201 @@ class GameRoomTest {
         assertTrue(addedValid);
         assertEquals(1, privateRoom.getPlayerCount());
         assertEquals("Alice", privateRoom.getOwnerUsername());
+    }
+
+    @Test
+    @DisplayName("GameRoom broadcasts PLAYER_FINISHED and MATCH_STANDINGS across multi-tier finishes")
+    void shouldBroadcastPodiumAndMatchStandingsWhenPlayersFinish() throws Exception {
+        GameRoom room = new GameRoom("room-podium", 3);
+        executor.submit(room);
+
+        TestClient alice = createTestClient("s-1", "Alice");
+        TestClient bob = createTestClient("s-2", "Bob");
+        TestClient charlie = createTestClient("s-3", "Charlie");
+
+        room.addPlayer(alice.session, "Alice");
+        room.addPlayer(bob.session, "Bob");
+        room.addPlayer(charlie.session, "Charlie");
+
+        Thread.sleep(150);
+        alice.drainEvents();
+        bob.drainEvents();
+        charlie.drainEvents();
+
+        UltimoEngine engine = room.getEngine();
+        assertNotNull(engine);
+
+        // Turn order: Alice -> Bob -> Charlie
+        Player pAlice = engine.getTurnManager().getCurrentPlayer();
+        CardColor color = engine.getDiscardPile().getActiveColor();
+
+        // Alice plays winning card
+        pAlice.getHand().clear();
+        Card aliceWin = new Card(color, CardValue.ONE);
+        pAlice.getHand().addCard(aliceWin);
+
+        room.enqueueCommand(alice.session, new ClientCommand.Play(aliceWin, null));
+        Thread.sleep(150);
+        bob.drainEvents();
+
+        assertTrue(bob.receivedEvents.stream().anyMatch(e -> e instanceof ServerEvent.PlayerFinished pf && pf.playerName().equals("Alice") && pf.rank() == 1));
+        assertEquals(RoomState.IN_PROGRESS, room.getState(), "Room should still be IN_PROGRESS");
+
+        // Bob plays winning card
+        Player pBob = engine.getTurnManager().getCurrentPlayer();
+        pBob.getHand().clear();
+        Card bobWin = new Card(aliceWin.color(), CardValue.TWO);
+        pBob.getHand().addCard(bobWin);
+
+        room.enqueueCommand(bob.session, new ClientCommand.Play(bobWin, null));
+        Thread.sleep(150);
+        charlie.drainEvents();
+
+        assertEquals(RoomState.FINISHED, room.getState());
+        assertTrue(charlie.receivedEvents.stream().anyMatch(e -> e instanceof ServerEvent.PlayerFinished pf && pf.playerName().equals("Bob") && pf.rank() == 2));
+        assertTrue(charlie.receivedEvents.stream().anyMatch(e -> e instanceof ServerEvent.PlayerFinished pf && pf.playerName().equals("Charlie") && pf.rank() == 3));
+        assertTrue(charlie.receivedEvents.stream().anyMatch(e -> e instanceof ServerEvent.MatchStandings ms && ms.placements().size() == 3));
+        assertTrue(charlie.receivedEvents.stream().anyMatch(e -> e instanceof ServerEvent.GameOver go && go.winnerName().equals("Alice")));
+    }
+
+    @Test
+    @DisplayName("Player disconnect and reconnect within grace period restores secret hand and game state")
+    void testPlayerDisconnectAndReconnectWithinTwoMinutes() throws Exception {
+        GameRoom room = new GameRoom("room-reconnect", 2);
+        executor.submit(room);
+
+        TestClient alice = createTestClient("s-1", "Alice");
+        TestClient bob = createTestClient("s-2", "Bob");
+
+        room.addPlayer(alice.session, "Alice");
+        room.addPlayer(bob.session, "Bob"); // Starts match
+        assertEquals(RoomState.IN_PROGRESS, room.getState());
+
+        Thread.sleep(100);
+        alice.drainEvents();
+        bob.drainEvents();
+
+        // Find Alice's hand cards
+        ServerEvent.HandUpdate aliceHandBefore = alice.receivedEvents.stream()
+                .filter(e -> e instanceof ServerEvent.HandUpdate)
+                .map(e -> (ServerEvent.HandUpdate) e)
+                .reduce((first, second) -> second)
+                .orElseThrow();
+        assertFalse(aliceHandBefore.cards().isEmpty());
+
+        // Alice's socket disconnects
+        room.handleDisconnect(alice.session);
+
+        // Room remains IN_PROGRESS during grace period
+        assertEquals(RoomState.IN_PROGRESS, room.getState());
+        assertTrue(room.isDisconnected("Alice"));
+        assertEquals(1, room.getConnectedSessionCount());
+
+        Thread.sleep(100);
+        bob.drainEvents();
+        assertTrue(bob.receivedEvents.stream().anyMatch(e -> e instanceof ServerEvent.ChatBroadcast cb && cb.message().contains("Alice disconnected. They have 2 minutes to rejoin.")));
+
+        // Alice reconnects with new session and same username
+        TestClient aliceReconnected = createTestClient("s-3", "Alice");
+        boolean reconnected = room.addPlayer(aliceReconnected.session, "Alice");
+        assertTrue(reconnected);
+        assertFalse(room.isDisconnected("Alice"));
+        assertEquals(2, room.getConnectedSessionCount());
+
+        Thread.sleep(100);
+        aliceReconnected.drainEvents();
+        bob.drainEvents();
+
+        // Alice received state recovery snapshot
+        ServerEvent.HandUpdate restoredHand = aliceReconnected.receivedEvents.stream()
+                .filter(e -> e instanceof ServerEvent.HandUpdate)
+                .map(e -> (ServerEvent.HandUpdate) e)
+                .findFirst()
+                .orElseThrow();
+        assertEquals(aliceHandBefore.cards().size(), restoredHand.cards().size());
+        assertEquals(aliceHandBefore.cards(), restoredHand.cards());
+
+        assertTrue(aliceReconnected.receivedEvents.stream().anyMatch(e -> e instanceof ServerEvent.TopCard));
+        assertTrue(aliceReconnected.receivedEvents.stream().anyMatch(e -> e instanceof ServerEvent.TurnAnnounced));
+        assertTrue(aliceReconnected.receivedEvents.stream().anyMatch(e -> e instanceof ServerEvent.OpponentUpdate opp && opp.opponentName().equals("Bob")));
+
+        // Bob was notified of reconnection
+        assertTrue(bob.receivedEvents.stream().anyMatch(e -> e instanceof ServerEvent.ChatBroadcast cb && cb.message().contains("Alice has reconnected!")));
+    }
+
+    @Test
+    @DisplayName("Player disconnect expiration removes player and awards forfeit victory to remaining player")
+    void testPlayerDisconnectExpiresAfterTwoMinutes() throws Exception {
+        GameRoom room = new GameRoom("room-expire", 2);
+        room.setReconnectGracePeriodMs(60);
+        room.setWatchdogCheckIntervalMs(20);
+        executor.submit(room);
+
+        TestClient alice = createTestClient("s-1", "Alice");
+        TestClient bob = createTestClient("s-2", "Bob");
+
+        room.addPlayer(alice.session, "Alice");
+        room.addPlayer(bob.session, "Bob"); // Starts match
+        assertEquals(RoomState.IN_PROGRESS, room.getState());
+
+        Thread.sleep(100);
+        alice.drainEvents();
+        bob.drainEvents();
+
+        // Bob disconnects
+        room.handleDisconnect(bob.session);
+        assertEquals(RoomState.IN_PROGRESS, room.getState());
+        assertTrue(room.isDisconnected("Bob"));
+
+        // Wait for watchdog to expire Bob's grace period
+        Thread.sleep(180);
+        alice.drainEvents();
+
+        assertEquals(RoomState.FINISHED, room.getState());
+        assertFalse(room.isDisconnected("Bob"));
+        assertTrue(alice.receivedEvents.stream().anyMatch(e -> e instanceof ServerEvent.ChatBroadcast cb && cb.message().contains("Bob failed to reconnect within 2 minutes and was removed.")));
+        assertTrue(alice.receivedEvents.stream().anyMatch(e -> e instanceof ServerEvent.GameOver go && go.winnerName().equals("Alice")));
+        assertTrue(alice.receivedEvents.stream().anyMatch(e -> e instanceof ServerEvent.ChatBroadcast cb && cb.message().contains("Alice wins by forfeit!")));
+    }
+
+    @Test
+    @DisplayName("When current player disconnect expires, turn advances to next active player in 3-player match")
+    void testTurnAdvancesWhenCurrentPlayerDisconnectExpires() throws Exception {
+        GameRoom room = new GameRoom("room-turn-advance", 3);
+        room.setReconnectGracePeriodMs(60);
+        room.setWatchdogCheckIntervalMs(20);
+        executor.submit(room);
+
+        TestClient alice = createTestClient("s-1", "Alice");
+        TestClient bob = createTestClient("s-2", "Bob");
+        TestClient charlie = createTestClient("s-3", "Charlie");
+
+        room.addPlayer(alice.session, "Alice");
+        room.addPlayer(bob.session, "Bob");
+        room.addPlayer(charlie.session, "Charlie"); // Starts match
+        assertEquals(RoomState.IN_PROGRESS, room.getState());
+
+        Thread.sleep(100);
+        alice.drainEvents();
+        bob.drainEvents();
+        charlie.drainEvents();
+
+        // Determine who has the first turn
+        String currentTurn = room.getEngine().getTurnManager().getCurrentPlayer().getUsername();
+        TestClient currentClient = currentTurn.equals("Alice") ? alice : currentTurn.equals("Bob") ? bob : charlie;
+
+        // Current player disconnects
+        room.handleDisconnect(currentClient.session);
+        assertTrue(room.isDisconnected(currentTurn));
+
+        // Wait for expiration
+        Thread.sleep(180);
+
+        assertEquals(RoomState.IN_PROGRESS, room.getState());
+        assertEquals(2, room.getPlayerCount());
+        assertFalse(room.isDisconnected(currentTurn));
+
+        String nextTurn = room.getEngine().getTurnManager().getCurrentPlayer().getUsername();
+        assertNotEquals(currentTurn, nextTurn, "Turn must advance away from expired player");
     }
 }

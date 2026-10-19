@@ -406,6 +406,17 @@ public final class ProtocolCodec {
                         .collect(Collectors.joining(" "));
                 yield "ROOM_LIST " + listStr + "\n";
             }
+            case ServerEvent.PlayerFinished finished ->
+                    "PLAYER_FINISHED " + finished.playerName() + " " + finished.rank() + "\n";
+            case ServerEvent.MatchStandings standings -> {
+                if (standings.placements().isEmpty()) {
+                    yield "MATCH_STANDINGS -\n";
+                }
+                String listStr = standings.placements().stream()
+                        .map(p -> p.rank() + ":" + p.playerName())
+                        .collect(Collectors.joining(" "));
+                yield "MATCH_STANDINGS " + listStr + "\n";
+            }
         };
     }
 
@@ -567,6 +578,37 @@ public final class ProtocolCodec {
                     yield new ServerEvent.RoomList(entries);
                 }
                 case "PONG" -> new ServerEvent.Pong();
+                case "PLAYER_FINISHED" -> {
+                    if (parts.length < 3) {
+                        throw new ProtocolException("Malformed PLAYER_FINISHED event: " + line);
+                    }
+                    String playerName = parts[1];
+                    try {
+                        int rank = Integer.parseInt(parts[2]);
+                        yield new ServerEvent.PlayerFinished(playerName, rank);
+                    } catch (NumberFormatException e) {
+                        throw new ProtocolException("Invalid rank in PLAYER_FINISHED: " + parts[2]);
+                    }
+                }
+                case "MATCH_STANDINGS" -> {
+                    List<ServerEvent.Placement> placements = new ArrayList<>();
+                    if (parts.length > 1 && !"-".equals(parts[1])) {
+                        for (int i = 1; i < parts.length; i++) {
+                            String token = parts[i];
+                            String[] kv = token.split(":", 2);
+                            if (kv.length == 2) {
+                                try {
+                                    int rank = Integer.parseInt(kv[0]);
+                                    String playerName = kv[1];
+                                    placements.add(new ServerEvent.Placement(rank, playerName));
+                                } catch (NumberFormatException e) {
+                                    throw new ProtocolException("Invalid placement rank: " + kv[0]);
+                                }
+                            }
+                        }
+                    }
+                    yield new ServerEvent.MatchStandings(placements);
+                }
                 default -> throw new ProtocolException("Unknown server event: " + eventName);
             };
         } catch (ProtocolException pe) {

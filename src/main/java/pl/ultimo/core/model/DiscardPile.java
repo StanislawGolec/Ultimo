@@ -29,6 +29,12 @@ public class DiscardPile {
         playedCards.addFirst(card);
     }
 
+    public void resetWithCard(Card card) {
+        Objects.requireNonNull(card, "card must not be null");
+        playedCards.clear();
+        playCard(card, card.color());
+    }
+
     public Optional<Card> getTopCard() {
         return Optional.ofNullable(playedCards.peekFirst());
     }

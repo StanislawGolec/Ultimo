@@ -143,4 +143,24 @@ public sealed interface ServerEvent {
             return EventType.ROOM_LIST;
         }
     }
+
+    public record Placement(int rank, String playerName) {}
+
+    record PlayerFinished(String playerName, int rank) implements ServerEvent {
+        @Override
+        public EventType type() {
+            return EventType.PLAYER_FINISHED;
+        }
+    }
+
+    record MatchStandings(List<Placement> placements) implements ServerEvent {
+        public MatchStandings {
+            placements = placements != null ? List.copyOf(placements) : List.of();
+        }
+
+        @Override
+        public EventType type() {
+            return EventType.MATCH_STANDINGS;
+        }
+    }
 }

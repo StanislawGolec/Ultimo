@@ -10,6 +10,7 @@ public class Player {
     private final String id;
     private final String username;
     private final PlayerHand hand;
+    private int placementRank = 0;
 
     public Player(String id, String username) {
         this.id = Objects.requireNonNull(id, "id must not be null");
@@ -27,6 +28,22 @@ public class Player {
 
     public PlayerHand getHand() {
         return hand;
+    }
+
+    public int getPlacementRank() {
+        return placementRank;
+    }
+
+    public void setPlacementRank(int placementRank) {
+        this.placementRank = placementRank;
+    }
+
+    public boolean isFinished() {
+        return placementRank > 0;
+    }
+
+    public boolean hasEmptyHand() {
+        return hand.isEmpty();
     }
 
     @Override

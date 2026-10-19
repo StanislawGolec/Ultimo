@@ -3,6 +3,9 @@ package pl.ultimo.core.state;
 import pl.ultimo.core.model.Card;
 import pl.ultimo.core.model.CardColor;
 
+import pl.ultimo.protocol.ServerEvent;
+
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -16,6 +19,7 @@ import java.util.Map;
  * @param deckCardCount remaining cards in draw deck
  * @param isGameOver whether the match has completed
  * @param winnerName username of the winner, if game is over
+ * @param standings podium rankings recorded so far
  */
 public record GameState(
         String activePlayerName,
@@ -25,5 +29,19 @@ public record GameState(
         Map<String, Integer> opponentCardCounts,
         int deckCardCount,
         boolean isGameOver,
-        String winnerName
-) {}
+        String winnerName,
+        List<ServerEvent.Placement> standings
+) {
+    public GameState(
+            String activePlayerName,
+            Card topCard,
+            CardColor activeColor,
+            Direction direction,
+            Map<String, Integer> opponentCardCounts,
+            int deckCardCount,
+            boolean isGameOver,
+            String winnerName
+    ) {
+        this(activePlayerName, topCard, activeColor, direction, opponentCardCounts, deckCardCount, isGameOver, winnerName, List.of());
+    }
+}

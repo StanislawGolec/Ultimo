@@ -73,8 +73,28 @@ public class TurnManager {
         direction = direction.toggle();
     }
 
+    public int getActivePlayerCount() {
+        int count = 0;
+        for (Player p : players) {
+            if (!p.isFinished()) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    public List<Player> getActivePlayers() {
+        List<Player> active = new ArrayList<>();
+        for (Player p : players) {
+            if (!p.isFinished()) {
+                active.add(p);
+            }
+        }
+        return Collections.unmodifiableList(active);
+    }
+
     public boolean isTwoPlayerGame() {
-        return players.size() == 2;
+        return getActivePlayerCount() == 2;
     }
 
     public Direction getDirection() {
@@ -93,9 +113,85 @@ public class TurnManager {
         return currentIndex;
     }
 
+    /**
+     * Resets turn rotation back to the first player and clockwise direction for a new round.
+     */
+    public synchronized void reset() {
+        this.currentIndex = 0;
+        this.direction = Direction.CLOCKWISE;
+    }
+
+    /**
+     * Resets turn rotation to the specified starting player and clockwise direction for a new round.
+     */
+    public synchronized void reset(Player startingPlayer) {
+        this.direction = Direction.CLOCKWISE;
+        int idx = (startingPlayer != null) ? players.indexOf(startingPlayer) : 0;
+        this.currentIndex = (idx != -1) ? idx : 0;
+    }
+
+    /**
+     * Removes a player from the rotation (e.g. upon disconnect timeout or forfeit).
+     * Adjusts the current index and advances the turn to the next player if the removed player was current.
+     *
+     * @param player the player to remove
+     * @return true if the removed player was currently taking their turn
+     */
+    public synchronized boolean removePlayer(Player player) {
+        if (player == null) {
+            return false;
+        }
+        int index = players.indexOf(player);
+        if (index == -1) {
+            return false;
+        }
+        boolean wasCurrent = (index == currentIndex);
+        players.remove(index);
+        if (players.isEmpty()) {
+            currentIndex = 0;
+            return wasCurrent;
+        }
+        if (index < currentIndex) {
+            currentIndex--;
+        } else if (index == currentIndex) {
+            if (direction == Direction.COUNTER_CLOCKWISE) {
+                currentIndex = (currentIndex - 1 + players.size()) % players.size();
+            } else {
+                currentIndex = currentIndex % players.size();
+            }
+        }
+        return wasCurrent;
+    }
+
     private int calculateNextIndex(int steps) {
+        if (players.isEmpty()) {
+            return 0;
+        }
+        int activeCount = getActivePlayerCount();
+        if (activeCount == 0) {
+            return currentIndex % players.size();
+        }
+        if (activeCount == 1) {
+            for (int i = 0; i < players.size(); i++) {
+                if (!players.get(i).isFinished()) {
+                    return i;
+                }
+            }
+            return currentIndex % players.size();
+        }
+
         int total = players.size();
-        int delta = steps * direction.getStep();
-        return (currentIndex + (delta % total) + total) % total;
+        int stepDir = direction.getStep();
+        int curr = currentIndex;
+        int activeStepsCount = 0;
+
+        while (activeStepsCount < steps) {
+            curr = (curr + stepDir + total) % total;
+            if (!players.get(curr).isFinished()) {
+                activeStepsCount++;
+            }
+        }
+        return curr;
     }
 }
+

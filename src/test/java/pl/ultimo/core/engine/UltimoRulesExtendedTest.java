@@ -142,9 +142,9 @@ class UltimoRulesExtendedTest {
         // Challenger catches them before taking their move
         UltimoEngine.CatchResult catchResult = engine.catchUltimo(challenger, current.getUsername());
         assertTrue(catchResult.success(), "Catch must succeed");
-        assertEquals(2, catchResult.penaltyCards());
+        assertEquals(6, catchResult.penaltyCards());
         assertEquals(current, catchResult.penalizedPlayer());
-        assertEquals(3, current.getHand().size(), "Penalized player should now have 1 + 2 = 3 cards");
+        assertEquals(7, current.getHand().size(), "Penalized player should now have 1 + 6 = 7 cards");
         assertNull(engine.getPendingUltimoViolator(), "Pending violator status must be cleared");
     }
 
@@ -415,8 +415,18 @@ class UltimoRulesExtendedTest {
 
         UltimoEngine.PlayResult res = engine.playCard(current, winCard, null);
         assertTrue(res.success());
-        assertTrue(res.isGameOver());
-        assertEquals(current, res.winner());
+        assertFalse(res.isGameOver(), "Game should continue among remaining active players");
+        assertEquals(1, current.getPlacementRank());
+
+        // Player 2 plays their last card to finish 2nd place
+        p2.getHand().clear();
+        Card p2WinCard = new Card(engine.getDiscardPile().getActiveColor(), CardValue.ONE);
+        p2.getHand().addCard(p2WinCard);
+        UltimoEngine.PlayResult res2 = engine.playCard(p2, p2WinCard, null);
+        assertTrue(res2.success());
+        assertTrue(res2.isGameOver(), "Game should finish when only 1 player remains holding cards");
+        assertEquals(2, p2.getPlacementRank());
+        assertEquals(3, p3.getPlacementRank());
 
         Optional<GameResult> gameResultOpt = engine.getResult();
         assertTrue(gameResultOpt.isPresent());

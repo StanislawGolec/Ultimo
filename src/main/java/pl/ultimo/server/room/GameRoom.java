@@ -53,8 +53,21 @@ public class GameRoom implements Runnable {
     private volatile RoomState state = RoomState.WAITING_FOR_PLAYERS;
     private UltimoEngine engine;
 
+    public record DisconnectedPlayerRecord(Player player, long disconnectedAt) {}
+
+    public static final long DEFAULT_RECONNECT_GRACE_PERIOD_MS = 120_000L;
+    public static final long DEFAULT_WATCHDOG_CHECK_INTERVAL_MS = 5_000L;
+
+    private final Map<String, DisconnectedPlayerRecord> disconnectedPlayers = new ConcurrentHashMap<>();
+    private final AtomicBoolean isWatchdogRunning = new AtomicBoolean(false);
+    private volatile Thread watchdogThread;
+    private volatile long reconnectGracePeriodMs = DEFAULT_RECONNECT_GRACE_PERIOD_MS;
+    private volatile long watchdogCheckIntervalMs = DEFAULT_WATCHDOG_CHECK_INTERVAL_MS;
+    private Consumer<GameRoom> onRoomFinished;
+
     public static final int MIN_CAPACITY = 2;
     public static final int MAX_CAPACITY = 16;
+
 
     public record RoomCommandEvent(ClientSession session, ClientCommand command) {}
 
@@ -112,6 +125,49 @@ public class GameRoom implements Runnable {
         }
     }
 
+    public boolean isDisconnected(String username) {
+        if (username == null) {
+            return false;
+        }
+        return disconnectedPlayers.containsKey(username.trim().toLowerCase(java.util.Locale.ROOT));
+    }
+
+    public DisconnectedPlayerRecord getDisconnectedPlayer(String username) {
+        if (username == null) {
+            return null;
+        }
+        return disconnectedPlayers.get(username.trim().toLowerCase(java.util.Locale.ROOT));
+    }
+
+    public Map<String, DisconnectedPlayerRecord> getDisconnectedPlayers() {
+        return Map.copyOf(disconnectedPlayers);
+    }
+
+    public int getConnectedSessionCount() {
+        roomLock.lock();
+        try {
+            return sessions.size();
+        } finally {
+            roomLock.unlock();
+        }
+    }
+
+    public List<String> getConnectedPlayerNames() {
+        roomLock.lock();
+        try {
+            List<String> names = new ArrayList<>();
+            for (ClientSession session : sessions) {
+                Player p = sessionPlayerMap.get(session.getSessionId());
+                if (p != null) {
+                    names.add(p.getUsername());
+                }
+            }
+            return names;
+        } finally {
+            roomLock.unlock();
+        }
+    }
+
     public boolean addPlayer(ClientSession session, String username) {
         return addPlayer(session, username, null);
     }
@@ -119,6 +175,7 @@ public class GameRoom implements Runnable {
     /**
      * Enrolls a player into the room if capacity is not exceeded, match hasn't started,
      * username is unique in this room, and access code is valid (if private).
+     * If the player is currently disconnected from an in-progress match, re-binds them.
      */
     public boolean addPlayer(ClientSession session, String username, String code) {
         Objects.requireNonNull(session, "session must not be null");
@@ -128,6 +185,11 @@ public class GameRoom implements Runnable {
             session.sendEvent(new ServerEvent.ErrorEvent("INVALID_ACCESS_CODE: Room is private and requires valid access code"));
             return false;
         }
+
+        if (isDisconnected(username)) {
+            return reconnectPlayer(session, username);
+        }
+
 
         List<String> playerNamesSnapshot;
         int currentCount;
@@ -177,6 +239,61 @@ public class GameRoom implements Runnable {
     }
 
     /**
+     * Rebinds a newly connected client session to an existing player entity who was disconnected
+     * during an active match within the 2-minute grace period.
+     */
+    public boolean reconnectPlayer(ClientSession session, String username) {
+        Objects.requireNonNull(session, "session must not be null");
+        Objects.requireNonNull(username, "username must not be null");
+
+        DisconnectedPlayerRecord record = disconnectedPlayers.remove(username.trim().toLowerCase(java.util.Locale.ROOT));
+        if (record == null) {
+            return false;
+        }
+
+        Player existingPlayer = record.player();
+        GameState snapshot = null;
+        List<Player> allPlayersSnapshot;
+        List<String> connectedNamesSnapshot;
+        int connectedCount;
+
+        roomLock.lock();
+        try {
+            sessions.add(session);
+            sessionPlayerMap.put(session.getSessionId(), existingPlayer);
+            session.setUsername(existingPlayer.getUsername());
+
+            if (engine != null) {
+                snapshot = engine.captureSnapshot();
+            }
+            allPlayersSnapshot = List.copyOf(players);
+            connectedNamesSnapshot = getConnectedPlayerNames();
+            connectedCount = sessions.size();
+        } finally {
+            roomLock.unlock();
+        }
+
+        // Deliver private authoritative state snapshot to reconnected session outside lock
+        if (snapshot != null) {
+            session.sendEvent(new ServerEvent.HandUpdate(List.copyOf(existingPlayer.getHand().getCards())));
+            session.sendEvent(new ServerEvent.TopCard(snapshot.topCard(), snapshot.activeColor()));
+            session.sendEvent(new ServerEvent.TurnAnnounced(snapshot.activePlayerName()));
+
+            for (Player other : allPlayersSnapshot) {
+                if (!other.equals(existingPlayer)) {
+                    session.sendEvent(new ServerEvent.OpponentUpdate(other.getUsername(), other.getHand().size()));
+                }
+            }
+        }
+
+        // Broadcast to room that player has reconnected
+        broadcast(new ServerEvent.ChatBroadcast("GAME", existingPlayer.getUsername() + " has reconnected!"));
+        broadcast(new ServerEvent.RoomStatus(roomId, connectedCount, maxPlayers, connectedNamesSnapshot));
+
+        return true;
+    }
+
+    /**
      * Explicitly starts the match if at least 2 players have joined.
      */
     public boolean startGame() {
@@ -186,7 +303,7 @@ public class GameRoom implements Runnable {
                 return false;
             }
 
-            this.engine = new UltimoEngine(players, random);
+            this.engine = new UltimoEngine(players, random, UltimoEngine.DEFAULT_TARGET_SCORE, true, true);
             this.engine.start();
             this.state = RoomState.IN_PROGRESS;
         } finally {
@@ -290,25 +407,38 @@ public class GameRoom implements Runnable {
         Player targetPlayer = null;
         roomLock.lock();
         try {
-            for (int i = 0; i < players.size() && i < sessions.size(); i++) {
-                if (players.get(i).getUsername().equalsIgnoreCase(targetName.trim())) {
-                    targetPlayer = players.get(i);
-                    targetSession = sessions.get(i);
+            for (Player p : players) {
+                if (p.getUsername().equalsIgnoreCase(targetName.trim())) {
+                    targetPlayer = p;
                     break;
+                }
+            }
+            if (targetPlayer != null) {
+                for (ClientSession s : sessions) {
+                    if (targetPlayer.equals(sessionPlayerMap.get(s.getSessionId()))) {
+                        targetSession = s;
+                        break;
+                    }
                 }
             }
         } finally {
             roomLock.unlock();
         }
 
-        if (targetPlayer == null || targetSession == null) {
+        if (targetPlayer == null) {
             session.sendEvent(new ServerEvent.ErrorEvent("Player '" + targetName + "' not found in room"));
             return;
         }
 
-        targetSession.sendEvent(new ServerEvent.ErrorEvent("You have been kicked from the room by the host"));
-        broadcast(new ServerEvent.ChatBroadcast("GAME", targetPlayer.getUsername() + " was kicked by the room owner."));
-        handleDisconnect(targetSession);
+        if (targetSession != null) {
+            targetSession.sendEvent(new ServerEvent.ErrorEvent("You have been kicked from the room by the host"));
+            broadcast(new ServerEvent.ChatBroadcast("GAME", targetPlayer.getUsername() + " was kicked by the room owner."));
+            handleDisconnect(targetSession);
+        } else {
+            broadcast(new ServerEvent.ChatBroadcast("GAME", targetPlayer.getUsername() + " was kicked by the room owner."));
+            disconnectedPlayers.remove(targetPlayer.getUsername().toLowerCase(java.util.Locale.ROOT));
+            handleExpiredPlayer(targetPlayer);
+        }
     }
 
     private void handleTransferOwnership(ClientSession session, ClientCommand.TransferOwnership to) {
@@ -386,7 +516,22 @@ public class GameRoom implements Runnable {
             broadcast(new ServerEvent.ChatBroadcast("GAME", player.getUsername() + " declared ULTIMO! (1 card remaining)"));
         }
 
+        if (player.isFinished() && player.getPlacementRank() > 0) {
+            broadcast(new ServerEvent.PlayerFinished(player.getUsername(), player.getPlacementRank()));
+            broadcast(new ServerEvent.ChatBroadcast("GAME", player.getUsername() + " finished in place #" + player.getPlacementRank() + "!"));
+        }
+
         if (result.isGameOver()) {
+            for (Player p : engine.getFinishedPlayers()) {
+                if (!p.equals(player)) {
+                    broadcast(new ServerEvent.PlayerFinished(p.getUsername(), p.getPlacementRank()));
+                    broadcast(new ServerEvent.ChatBroadcast("GAME", p.getUsername() + " finished in place #" + p.getPlacementRank() + "!"));
+                }
+            }
+            if (!engine.getMatchStandings().isEmpty()) {
+                broadcast(new ServerEvent.MatchStandings(engine.getMatchStandings()));
+            }
+
             Optional<GameResult> resultOpt = engine.getResult();
             if (resultOpt.isPresent()) {
                 GameResult gr = resultOpt.get();
@@ -396,7 +541,8 @@ public class GameRoom implements Runnable {
 
             this.state = RoomState.FINISHED;
             broadcastGameState();
-            broadcast(new ServerEvent.GameOver(result.winner().getUsername()));
+            String winnerName = result.winner() != null ? result.winner().getUsername() : player.getUsername();
+            broadcast(new ServerEvent.GameOver(winnerName));
             return;
         }
 
@@ -468,34 +614,26 @@ public class GameRoom implements Runnable {
             return;
         }
 
-        boolean wasWildVictim = engine.getPendingWildChallenge() != null
-                && player.equals(engine.getPendingWildChallenge().victim());
-        if (wasWildVictim) {
-            boolean accepted = engine.acceptWildFour(player);
-            if (accepted) {
-                broadcast(new ServerEvent.ChatBroadcast("GAME", player.getUsername() + " accepted Wild Draw Four penalty (drew 4 cards and forfeited turn)."));
-                broadcastGameState();
-                return;
-            }
-        }
-
-        Optional<Card> drawnCard = engine.drawCard(player);
-        if (drawnCard.isEmpty()) {
+        UltimoEngine.DrawResult drawRes = engine.drawCardWithResult(player);
+        if (drawRes.cardsDrawn() == 0 && drawRes.card().isEmpty()) {
             session.sendEvent(new ServerEvent.ErrorEvent("Cannot draw (either not your turn or already drawn this turn)"));
             return;
         }
 
-        session.sendEvent(new ServerEvent.DrawResult(drawnCard.get()));
-
-        // Check if player has any legally playable cards in hand after drawing
-        GameState snapshot = engine.captureSnapshot();
-        boolean hasPlayable = MoveValidator.hasPlayableCard(player.getHand(), snapshot.topCard(), snapshot.activeColor());
-
-        if (!hasPlayable) {
-            // Auto-pass: player drew a card and has zero legal moves
-            engine.passTurn(player);
+        if (drawRes.cardsDrawn() > 1) {
             broadcast(new ServerEvent.ChatBroadcast("GAME",
-                    player.getUsername() + " drew a card (" + drawnCard.get() + ") but has no playable moves. Turn passed."));
+                    player.getUsername() + " accepted penalty and drew " + drawRes.cardsDrawn() + " cards."));
+            broadcastGameState();
+            return;
+        }
+
+        if (drawRes.card().isPresent()) {
+            session.sendEvent(new ServerEvent.DrawResult(drawRes.card().get()));
+        }
+
+        if (drawRes.autoPassed()) {
+            broadcast(new ServerEvent.ChatBroadcast("GAME",
+                    player.getUsername() + " drew a card (" + drawRes.card().orElse(null) + ") but has no playable moves. Turn passed."));
         }
 
         broadcastGameState();
@@ -510,16 +648,10 @@ public class GameRoom implements Runnable {
             return;
         }
 
-        boolean wasWildVictim = engine.getPendingWildChallenge() != null
-                && player.equals(engine.getPendingWildChallenge().victim());
-        if (wasWildVictim) {
-            boolean accepted = engine.acceptWildFour(player);
-            if (accepted) {
-                broadcast(new ServerEvent.ChatBroadcast("GAME", player.getUsername() + " accepted Wild Draw Four penalty (drew 4 cards and forfeited turn)."));
-                broadcastGameState();
-                return;
-            }
-        }
+        boolean wasSkipVictim = engine.isActionDefendingEnabled() && engine.isPendingSkipDeflection()
+                && player.equals(engine.getSkipTarget());
+        boolean wasDrawVictim = engine.isActionDefendingEnabled() && engine.getPendingDrawPenalty() > 0
+                && player.equals(engine.getDrawTarget());
 
         boolean passed = engine.passTurn(player);
         if (!passed) {
@@ -527,7 +659,13 @@ public class GameRoom implements Runnable {
             return;
         }
 
-        broadcast(new ServerEvent.ChatBroadcast("GAME", player.getUsername() + " passed their turn."));
+        if (wasSkipVictim) {
+            broadcast(new ServerEvent.ChatBroadcast("GAME", player.getUsername() + " was skipped!"));
+        } else if (wasDrawVictim) {
+            broadcast(new ServerEvent.ChatBroadcast("GAME", player.getUsername() + " accepted penalty and drew cards."));
+        } else {
+            broadcast(new ServerEvent.ChatBroadcast("GAME", player.getUsername() + " passed their turn."));
+        }
         broadcastGameState();
     }
 
@@ -560,9 +698,11 @@ public class GameRoom implements Runnable {
 
         roomLock.lock();
         try {
-            for (int i = 0; i < players.size() && i < sessions.size(); i++) {
-                Player target = players.get(i);
-                ClientSession targetSession = sessions.get(i);
+            for (ClientSession targetSession : sessions) {
+                Player target = sessionPlayerMap.get(targetSession.getSessionId());
+                if (target == null) {
+                    continue;
+                }
                 List<Card> handCards = List.copyOf(target.getHand().getCards());
 
                 List<ServerEvent.OpponentUpdate> oppUpdates = new ArrayList<>();
@@ -590,9 +730,10 @@ public class GameRoom implements Runnable {
         Player leavingPlayer;
         List<String> playerNamesSnapshot;
         int remainingCount;
-        Player winner = null;
+        int connectedCount;
         RoomState currentState;
         String nextOwner = null;
+        boolean allDisconnected = false;
 
         roomLock.lock();
         try {
@@ -604,26 +745,54 @@ public class GameRoom implements Runnable {
                 return;
             }
 
-            players.remove(leavingPlayer);
             currentState = state;
-            remainingCount = players.size();
-            playerNamesSnapshot = players.stream().map(Player::getUsername).toList();
+            connectedCount = sessions.size();
 
-            boolean wasOwner = ownerUsername != null && leavingPlayer.getUsername().equalsIgnoreCase(ownerUsername);
-            if (wasOwner) {
-                if (!players.isEmpty()) {
-                    this.ownerUsername = players.getFirst().getUsername();
-                    nextOwner = this.ownerUsername;
-                } else {
-                    this.ownerUsername = null;
+            if (currentState == RoomState.WAITING_FOR_PLAYERS) {
+                players.remove(leavingPlayer);
+                remainingCount = players.size();
+                playerNamesSnapshot = players.stream().map(Player::getUsername).toList();
+
+                boolean wasOwner = ownerUsername != null && leavingPlayer.getUsername().equalsIgnoreCase(ownerUsername);
+                if (wasOwner) {
+                    if (!players.isEmpty()) {
+                        this.ownerUsername = players.getFirst().getUsername();
+                        nextOwner = this.ownerUsername;
+                    } else {
+                        this.ownerUsername = null;
+                    }
                 }
-            }
+            } else if (currentState == RoomState.IN_PROGRESS) {
+                if (connectedCount == 0) {
+                    // Immediate Empty Room Reclamation: all players disconnected
+                    allDisconnected = true;
+                    this.state = RoomState.FINISHED;
+                    remainingCount = 0;
+                    playerNamesSnapshot = List.of();
+                } else {
+                    // Stage 13: 2-Minute Reconnection Grace Period
+                    // Retain Player entity in memory, add to disconnectedPlayers
+                    disconnectedPlayers.put(leavingPlayer.getUsername().toLowerCase(java.util.Locale.ROOT),
+                            new DisconnectedPlayerRecord(leavingPlayer, System.currentTimeMillis()));
+                    remainingCount = players.size();
+                    playerNamesSnapshot = getConnectedPlayerNames();
 
-            if (currentState == RoomState.IN_PROGRESS && remainingCount == 1) {
-                this.state = RoomState.FINISHED;
-                winner = players.getFirst();
-            } else if (currentState == RoomState.IN_PROGRESS && remainingCount == 0) {
-                this.state = RoomState.FINISHED;
+                    // Transfer host ownership to next active connected player if host disconnected
+                    boolean wasOwner = ownerUsername != null && leavingPlayer.getUsername().equalsIgnoreCase(ownerUsername);
+                    if (wasOwner) {
+                        Player nextActive = players.stream()
+                                .filter(p -> !isDisconnected(p.getUsername()))
+                                .findFirst()
+                                .orElse(null);
+                        if (nextActive != null) {
+                            this.ownerUsername = nextActive.getUsername();
+                            nextOwner = this.ownerUsername;
+                        }
+                    }
+                }
+            } else {
+                remainingCount = players.size();
+                playerNamesSnapshot = getConnectedPlayerNames();
             }
         } finally {
             roomLock.unlock();
@@ -635,6 +804,11 @@ public class GameRoom implements Runnable {
             } catch (Exception ignored) {}
         }
 
+        if (allDisconnected) {
+            stop();
+            return;
+        }
+
         if (nextOwner != null) {
             broadcast(new ServerEvent.RoomOwnerChanged(nextOwner));
             broadcast(new ServerEvent.ChatBroadcast("GAME", "Host left. Ownership transferred to " + nextOwner));
@@ -643,17 +817,123 @@ public class GameRoom implements Runnable {
         if (currentState == RoomState.WAITING_FOR_PLAYERS) {
             broadcast(new ServerEvent.RoomStatus(roomId, remainingCount, maxPlayers, playerNamesSnapshot));
         } else if (currentState == RoomState.IN_PROGRESS) {
-            broadcast(new ServerEvent.ChatBroadcast("GAME", leavingPlayer.getUsername() + " left the game."));
+            broadcast(new ServerEvent.ChatBroadcast("GAME", leavingPlayer.getUsername() + " disconnected. They have 2 minutes to rejoin."));
+            broadcast(new ServerEvent.RoomStatus(roomId, connectedCount, maxPlayers, playerNamesSnapshot));
 
-            if (winner != null) {
-                broadcast(new ServerEvent.GameOver(winner.getUsername()));
-                broadcast(new ServerEvent.ChatBroadcast("GAME", winner.getUsername() + " wins by forfeit!"));
-                stop();
-            } else if (remainingCount == 0) {
-                stop();
-            } else {
-                broadcastGameState();
+            // Start virtual thread watchdog if not already running
+            startWatchdogIfNeeded();
+        }
+    }
+
+    private void startWatchdogIfNeeded() {
+        if (!isRunning.get() || state != RoomState.IN_PROGRESS || disconnectedPlayers.isEmpty()) {
+            return;
+        }
+        if (isWatchdogRunning.compareAndSet(false, true)) {
+            watchdogThread = Thread.ofVirtual().name("watchdog-" + roomId).start(this::runWatchdog);
+        }
+    }
+
+    private void runWatchdog() {
+        try {
+            while (isRunning.get() && isWatchdogRunning.get()) {
+                Thread.sleep(watchdogCheckIntervalMs);
+                checkExpiredDisconnections();
+                if (disconnectedPlayers.isEmpty()) {
+                    isWatchdogRunning.set(false);
+                    break;
+                }
             }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } finally {
+            isWatchdogRunning.set(false);
+        }
+    }
+
+    public void checkExpiredDisconnections() {
+        checkExpiredDisconnections(System.currentTimeMillis());
+    }
+
+    public void checkExpiredDisconnections(long now) {
+        if (state != RoomState.IN_PROGRESS || disconnectedPlayers.isEmpty()) {
+            return;
+        }
+
+        List<DisconnectedPlayerRecord> expired = new ArrayList<>();
+        for (DisconnectedPlayerRecord record : disconnectedPlayers.values()) {
+            if (now - record.disconnectedAt() >= reconnectGracePeriodMs) {
+                expired.add(record);
+            }
+        }
+
+        for (DisconnectedPlayerRecord record : expired) {
+            if (disconnectedPlayers.remove(record.player().getUsername().toLowerCase(java.util.Locale.ROOT)) != null) {
+                handleExpiredPlayer(record.player());
+            }
+        }
+    }
+
+    private void handleExpiredPlayer(Player player) {
+        Player winner = null;
+        boolean wasCurrentTurn = false;
+        int remainingCount;
+        String nextOwner = null;
+
+        roomLock.lock();
+        try {
+            if (state != RoomState.IN_PROGRESS) {
+                return;
+            }
+
+            if (engine != null) {
+                wasCurrentTurn = engine.removePlayer(player);
+            }
+            players.remove(player);
+            remainingCount = players.size();
+
+            boolean wasOwner = ownerUsername != null && player.getUsername().equalsIgnoreCase(ownerUsername);
+            if (wasOwner) {
+                Player nextActive = players.stream()
+                        .filter(p -> !isDisconnected(p.getUsername()))
+                        .findFirst()
+                        .orElse(null);
+                if (nextActive != null) {
+                    this.ownerUsername = nextActive.getUsername();
+                    nextOwner = this.ownerUsername;
+                } else if (!players.isEmpty()) {
+                    this.ownerUsername = players.getFirst().getUsername();
+                    nextOwner = this.ownerUsername;
+                } else {
+                    this.ownerUsername = null;
+                }
+            }
+
+            if (remainingCount == 1) {
+                this.state = RoomState.FINISHED;
+                winner = players.getFirst();
+            } else if (remainingCount == 0) {
+                this.state = RoomState.FINISHED;
+            }
+        } finally {
+            roomLock.unlock();
+        }
+
+        broadcast(new ServerEvent.ChatBroadcast("GAME", player.getUsername() + " failed to reconnect within 2 minutes and was removed."));
+
+        if (nextOwner != null) {
+            broadcast(new ServerEvent.RoomOwnerChanged(nextOwner));
+            broadcast(new ServerEvent.ChatBroadcast("GAME", "Host left. Ownership transferred to " + nextOwner));
+        }
+
+        if (winner != null) {
+            broadcast(new ServerEvent.GameOver(winner.getUsername()));
+            broadcast(new ServerEvent.ChatBroadcast("GAME", winner.getUsername() + " wins by forfeit!"));
+            stop();
+        } else if (remainingCount == 0) {
+            stop();
+        } else {
+            broadcastGameState();
         }
     }
 
@@ -734,15 +1014,49 @@ public class GameRoom implements Runnable {
         return engine;
     }
 
+    public long getReconnectGracePeriodMs() {
+        return reconnectGracePeriodMs;
+    }
+
+    public void setReconnectGracePeriodMs(long millis) {
+        this.reconnectGracePeriodMs = Math.max(10L, millis);
+    }
+
+    public long getWatchdogCheckIntervalMs() {
+        return watchdogCheckIntervalMs;
+    }
+
+    public void setWatchdogCheckIntervalMs(long millis) {
+        this.watchdogCheckIntervalMs = Math.max(10L, millis);
+    }
+
+    public void setOnRoomFinished(Consumer<GameRoom> onRoomFinished) {
+        this.onRoomFinished = onRoomFinished;
+    }
+
     public void stop() {
         isRunning.set(false);
+        isWatchdogRunning.set(false);
+        if (watchdogThread != null) {
+            watchdogThread.interrupt();
+        }
         roomLock.lock();
         try {
             sessions.clear();
             sessionPlayerMap.clear();
+            disconnectedPlayers.clear();
             commandQueue.clear();
         } finally {
             roomLock.unlock();
         }
+        if (onRoomFinished != null) {
+            try {
+                onRoomFinished.accept(this);
+            } catch (Exception ignored) {}
+        }
+    }
+
+    public boolean isRunning() {
+        return isRunning.get();
     }
 }

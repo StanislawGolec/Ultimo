@@ -251,17 +251,24 @@ public class ServerApp implements ConnectionListener {
                     Optional<GameRoom> existingRoomOpt = roomManager.getRoom(targetRoomId);
                     if (existingRoomOpt.isPresent()) {
                         GameRoom targetRoom = existingRoomOpt.get();
-                        if (targetRoom.isFull()) {
-                            session.sendEvent(new ServerEvent.ErrorEvent("Targeted room " + targetRoomId + " is full"));
-                            return;
-                        }
-                        if (!targetRoom.validateAccess(join.accessCode())) {
-                            session.sendEvent(new ServerEvent.ErrorEvent("INVALID_ACCESS_CODE: Room is private and requires valid access code"));
-                            return;
-                        }
-                        if (targetRoom.hasPlayer(join.username())) {
-                            session.sendEvent(new ServerEvent.ErrorEvent("NAME_TAKEN: Player with name '" + join.username() + "' already exists in this room"));
-                            return;
+                        if (targetRoom.isDisconnected(join.username())) {
+                            if (!targetRoom.validateAccess(join.accessCode())) {
+                                session.sendEvent(new ServerEvent.ErrorEvent("INVALID_ACCESS_CODE: Room is private and requires valid access code"));
+                                return;
+                            }
+                        } else {
+                            if (targetRoom.isFull()) {
+                                session.sendEvent(new ServerEvent.ErrorEvent("Targeted room " + targetRoomId + " is full"));
+                                return;
+                            }
+                            if (!targetRoom.validateAccess(join.accessCode())) {
+                                session.sendEvent(new ServerEvent.ErrorEvent("INVALID_ACCESS_CODE: Room is private and requires valid access code"));
+                                return;
+                            }
+                            if (targetRoom.hasPlayer(join.username())) {
+                                session.sendEvent(new ServerEvent.ErrorEvent("NAME_TAKEN: Player with name '" + join.username() + "' already exists in this room"));
+                                return;
+                            }
                         }
                     }
                 }

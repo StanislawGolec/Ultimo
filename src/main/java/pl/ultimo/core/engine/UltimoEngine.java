@@ -2,11 +2,13 @@ package pl.ultimo.core.engine;
 
 import pl.ultimo.core.model.Card;
 import pl.ultimo.core.model.CardColor;
+import pl.ultimo.core.model.CardValue;
 import pl.ultimo.core.model.Deck;
 import pl.ultimo.core.model.DiscardPile;
 import pl.ultimo.core.model.Player;
 import pl.ultimo.core.state.GameState;
 import pl.ultimo.core.state.TurnManager;
+import pl.ultimo.protocol.ServerEvent;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -54,6 +56,22 @@ public class UltimoEngine {
     private boolean isTournamentWon = false;
     private Player tournamentWinner = null;
     private int lastRoundPointsEarned = 0;
+    // Multi-tier podium and placement tracking
+    private int nextRank = 1;
+    private final List<Player> finishedPlayers = new ArrayList<>();
+    private final List<ServerEvent.Placement> matchStandings = new ArrayList<>();
+
+    // Action Defending (Skip Deflection & Draw Stacking) and Auto-Pass state
+    private boolean actionDefendingEnabled = false;
+    private boolean autoPassEnabled = false;
+
+    private boolean pendingSkipDeflection = false;
+    private Player skipTarget = null;
+
+    private int pendingDrawPenalty = 0;
+    private CardValue pendingDrawType = null;
+    private Player drawTarget = null;
+    private DrawResult lastDrawResult = null;
 
     public record PlayResult(
             boolean success,
@@ -88,24 +106,40 @@ public class UltimoEngine {
 
     public record WildChallengeResult(boolean success, String message, boolean isGuilty, Player penalizedPlayer, int cardsDrawn) {}
 
+    public record DrawResult(Optional<Card> card, boolean autoPassed, int cardsDrawn) {}
+
     public UltimoEngine(List<Player> players) {
-        this(players, new Random(), DEFAULT_TARGET_SCORE);
+        this(players, new Random(), DEFAULT_TARGET_SCORE, false, false);
+    }
+
+    public UltimoEngine(List<Player> players, boolean actionDefendingEnabled) {
+        this(players, new Random(), DEFAULT_TARGET_SCORE, actionDefendingEnabled, true);
+    }
+
+    public UltimoEngine(List<Player> players, boolean actionDefendingEnabled, boolean autoPassEnabled) {
+        this(players, new Random(), DEFAULT_TARGET_SCORE, actionDefendingEnabled, autoPassEnabled);
     }
 
     public UltimoEngine(List<Player> players, Random random) {
-        this(players, random, DEFAULT_TARGET_SCORE);
+        this(players, random, DEFAULT_TARGET_SCORE, false, false);
     }
 
     public UltimoEngine(List<Player> players, Random random, int targetScore) {
+        this(players, random, targetScore, false, false);
+    }
+
+    public UltimoEngine(List<Player> players, Random random, int targetScore, boolean actionDefendingEnabled, boolean autoPassEnabled) {
         if (players == null || players.size() < 2) {
             throw new IllegalArgumentException("At least 2 players are required to start Ultimo");
         }
-        this.players = List.copyOf(players);
+        this.players = new ArrayList<>(players);
         this.random = Objects.requireNonNull(random, "random must not be null");
         this.targetScore = targetScore > 0 ? targetScore : DEFAULT_TARGET_SCORE;
         this.deck = Deck.createDeckForPlayerCount(this.players.size(), random);
         this.discardPile = new DiscardPile();
         this.turnManager = new TurnManager(this.players);
+        this.actionDefendingEnabled = actionDefendingEnabled;
+        this.autoPassEnabled = autoPassEnabled;
 
         for (Player p : this.players) {
             this.cumulativeScores.put(p.getUsername(), 0);
@@ -156,10 +190,15 @@ public class UltimoEngine {
 
         this.deck = Deck.createDeckForPlayerCount(this.players.size(), random);
         this.discardPile = new DiscardPile();
+        this.turnManager.reset();
 
         for (Player p : players) {
             p.getHand().clear();
+            p.setPlacementRank(0);
         }
+        this.nextRank = 1;
+        this.finishedPlayers.clear();
+        this.matchStandings.clear();
 
         for (int i = 0; i < STARTING_HAND_SIZE; i++) {
             for (Player player : players) {
@@ -178,6 +217,9 @@ public class UltimoEngine {
 
         discardPile.playCard(startingCard, startingCard.color());
 
+        Player previousWinner = this.winner;
+        this.turnManager.reset(previousWinner != null ? previousWinner : players.getFirst());
+
         this.isGameStarted = true;
         this.isGameOver = false;
         this.hasDrawnThisTurn = false;
@@ -185,6 +227,18 @@ public class UltimoEngine {
         this.pendingWildChallenge = null;
         this.pendingUltimoViolator = null;
         this.ultimoDeclared.clear();
+        this.pendingSkipDeflection = false;
+        this.skipTarget = null;
+        this.pendingDrawPenalty = 0;
+        this.pendingDrawType = null;
+        this.drawTarget = null;
+        this.lastDrawResult = null;
+        this.nextRank = 1;
+        this.finishedPlayers.clear();
+        this.matchStandings.clear();
+        for (Player p : players) {
+            p.setPlacementRank(0);
+        }
 
         return true;
     }
@@ -211,7 +265,26 @@ public class UltimoEngine {
         }
 
         if (pendingWildChallenge != null && player.equals(pendingWildChallenge.victim())) {
-            return PlayResult.failure("Must either challenge the Wild Draw Four or accept the penalty cards (draw/pass)");
+            boolean canStackWildFour = actionDefendingEnabled && cards.stream().allMatch(c -> c.value() == pl.ultimo.core.model.CardValue.WILD_DRAW_FOUR);
+            if (!canStackWildFour) {
+                return PlayResult.failure("Must either challenge the Wild Draw Four or accept the penalty cards (draw/pass)");
+            }
+        }
+
+        if (actionDefendingEnabled && pendingSkipDeflection && player.equals(skipTarget)) {
+            boolean canDefend = cards.stream().allMatch(c -> c.value() == pl.ultimo.core.model.CardValue.SKIP);
+            if (!canDefend) {
+                acceptSkip(player);
+                return PlayResult.failure("Must defend with a SKIP card or pass/draw to accept the skip; turn forfeited");
+            }
+        }
+
+        if (actionDefendingEnabled && pendingDrawPenalty > 0 && player.equals(drawTarget)) {
+            boolean canDefend = cards.stream().allMatch(c -> c.value() == pendingDrawType || c.value() == pl.ultimo.core.model.CardValue.WILD_DRAW_FOUR);
+            if (!canDefend) {
+                int penalty = acceptDrawPenalty(player);
+                return PlayResult.failure("Must defend with a " + pendingDrawType + " card or draw the accumulated penalty (" + penalty + " cards); turn forfeited");
+            }
         }
 
         // When a new turn starts, window to catch previous Ultimo violator closes
@@ -262,18 +335,71 @@ public class UltimoEngine {
             discardPile.playCard(card, effectiveColor);
         }
 
-        // Check if player has won the round
+        // Check if player has shed their last card (podium finish)
         if (player.getHand().isEmpty()) {
-            Card lastCard = orderedCards.get(orderedCards.size() - 1);
-            if (lastCard.value() == pl.ultimo.core.model.CardValue.DRAW_TWO) {
-                drawCardsFor(turnManager.peekNextPlayer(), 2 * orderedCards.size());
-            } else if (lastCard.value() == pl.ultimo.core.model.CardValue.WILD_DRAW_FOUR) {
-                drawCardsFor(turnManager.peekNextPlayer(), 4 * orderedCards.size());
+            int rank = nextRank++;
+            player.setPlacementRank(rank);
+            finishedPlayers.add(player);
+            matchStandings.add(new ServerEvent.Placement(rank, player.getUsername()));
+
+            if (this.winner == null) {
+                this.winner = player;
+                tallyRoundScores(player);
             }
-            this.isGameOver = true;
-            this.winner = player;
-            tallyRoundScores(player);
-            return PlayResult.success(orderedCards, false, true, player);
+
+            Card lastCard = orderedCards.get(orderedCards.size() - 1);
+            int count = orderedCards.size();
+
+            // Apply action effect to next active player before winner exits rotation
+            if (lastCard.value() == pl.ultimo.core.model.CardValue.DRAW_TWO) {
+                int penalty = 2 * count + (actionDefendingEnabled ? pendingDrawPenalty : 0);
+                Player victim = turnManager.peekNextPlayer();
+                drawCardsFor(victim, penalty);
+                pendingDrawPenalty = 0;
+                turnManager.skipTurn();
+            } else if (lastCard.value() == pl.ultimo.core.model.CardValue.WILD_DRAW_FOUR) {
+                int penalty = 4 * count + (actionDefendingEnabled ? pendingDrawPenalty : 0);
+                Player victim = turnManager.peekNextPlayer();
+                drawCardsFor(victim, penalty);
+                pendingDrawPenalty = 0;
+                turnManager.skipTurn();
+            } else if (lastCard.value() == pl.ultimo.core.model.CardValue.SKIP) {
+                turnManager.advanceTurn(1 + count);
+            } else if (lastCard.value() == pl.ultimo.core.model.CardValue.REVERSE) {
+                if (turnManager.isTwoPlayerGame()) {
+                    if (count % 2 == 1) {
+                        turnManager.advanceTurn(2);
+                    } else {
+                        turnManager.advanceTurn(1);
+                    }
+                } else {
+                    for (int i = 0; i < count; i++) {
+                        turnManager.reverseDirection();
+                    }
+                    turnManager.advanceTurn(1);
+                }
+            } else {
+                turnManager.advanceTurn(1);
+            }
+
+            // Check if only 1 active player remains
+            if (getActivePlayersCount() <= 1) {
+                for (Player remaining : players) {
+                    if (!remaining.isFinished()) {
+                        int finalRank = nextRank++;
+                        remaining.setPlacementRank(finalRank);
+                        finishedPlayers.add(remaining);
+                        matchStandings.add(new ServerEvent.Placement(finalRank, remaining.getUsername()));
+                        break;
+                    }
+                }
+                this.isGameOver = true;
+                this.hasDrawnThisTurn = false;
+                return PlayResult.success(orderedCards, false, true, this.winner);
+            } else {
+                this.hasDrawnThisTurn = false;
+                return PlayResult.success(orderedCards, false, false, null);
+            }
         }
 
         boolean isUltimo = player.getHand().size() == 1;
@@ -299,7 +425,7 @@ public class UltimoEngine {
         if (!isGameStarted || isGameOver) {
             return false;
         }
-        if (player.getHand().size() > 2) {
+        if (player.getHand().size() > 2 || player.getHand().isEmpty()) {
             return false;
         }
 
@@ -346,12 +472,12 @@ public class UltimoEngine {
             return new CatchResult(false, "Window to catch " + target.getUsername() + " has expired (turn has progressed)", null, 0);
         }
 
-        // Penalize target with 2 cards
-        drawCardsFor(target, 2);
+        // Penalize target with 6 cards
+        drawCardsFor(target, 6);
         ultimoDeclared.remove(target.getUsername());
         pendingUltimoViolator = null;
 
-        return new CatchResult(true, target.getUsername() + " was caught without saying ULTIMO and drew 2 penalty cards!", target, 2);
+        return new CatchResult(true, target.getUsername() + " was caught without saying ULTIMO and drew 6 penalty cards!", target, 6);
     }
 
     /**
@@ -370,6 +496,9 @@ public class UltimoEngine {
 
         PendingWildFourChallenge challenge = this.pendingWildChallenge;
         this.pendingWildChallenge = null;
+        this.pendingDrawPenalty = 0;
+        this.pendingDrawType = null;
+        this.drawTarget = null;
 
         if (challenge.isGuilty()) {
             // Offender held matching color -> Offender draws 4 cards! Victim does not draw and turn is not skipped
@@ -400,12 +529,54 @@ public class UltimoEngine {
         return resolvePendingWildChallengeIfAny(player);
     }
 
+    public boolean acceptSkip(Player player) {
+        if (!isGameStarted || isGameOver) {
+            return false;
+        }
+        if (!player.equals(turnManager.getCurrentPlayer())) {
+            return false;
+        }
+        if (!pendingSkipDeflection || !player.equals(skipTarget)) {
+            return false;
+        }
+        pendingSkipDeflection = false;
+        skipTarget = null;
+        turnManager.advanceTurn(1);
+        this.hasDrawnThisTurn = false;
+        return true;
+    }
+
+    public int acceptDrawPenalty(Player player) {
+        if (!isGameStarted || isGameOver) {
+            return 0;
+        }
+        if (!player.equals(turnManager.getCurrentPlayer())) {
+            return 0;
+        }
+        if (pendingDrawPenalty <= 0 || !player.equals(drawTarget)) {
+            return 0;
+        }
+        int count = pendingDrawPenalty;
+        drawCardsFor(player, count);
+        pendingDrawPenalty = 0;
+        pendingDrawType = null;
+        drawTarget = null;
+        pendingWildChallenge = null;
+        turnManager.advanceTurn(1);
+        this.hasDrawnThisTurn = false;
+        return count;
+    }
+
     private boolean resolvePendingWildChallengeIfAny(Player activePlayer) {
         if (pendingWildChallenge != null) {
             if (activePlayer.equals(pendingWildChallenge.victim())) {
                 drawCardsFor(pendingWildChallenge.victim(), pendingWildChallenge.cardCount());
                 pendingWildChallenge = null;
+                pendingDrawPenalty = 0;
+                pendingDrawType = null;
+                drawTarget = null;
                 turnManager.advanceTurn(1);
+                this.hasDrawnThisTurn = false;
                 return true;
             }
         }
@@ -413,22 +584,45 @@ public class UltimoEngine {
     }
 
     /**
-     * Draws one card from the draw pile for the active player.
+     * Draws one card from the draw pile with full status result (autoPass, penalty cards drawn).
      */
-    public Optional<Card> drawCard(Player player) {
+    public DrawResult drawCardWithResult(Player player) {
         if (!isGameStarted || isGameOver) {
-            return Optional.empty();
+            this.lastDrawResult = new DrawResult(Optional.empty(), false, 0);
+            return this.lastDrawResult;
         }
         if (!player.equals(turnManager.getCurrentPlayer())) {
-            return Optional.empty();
+            this.lastDrawResult = new DrawResult(Optional.empty(), false, 0);
+            return this.lastDrawResult;
         }
 
-        if (resolvePendingWildChallengeIfAny(player)) {
-            return Optional.empty();
+        if (pendingWildChallenge != null && player.equals(pendingWildChallenge.victim())) {
+            int count = pendingWildChallenge.cardCount();
+            acceptWildFour(player);
+            this.lastDrawResult = new DrawResult(Optional.empty(), false, count);
+            return this.lastDrawResult;
+        }
+
+        if (actionDefendingEnabled && pendingDrawPenalty > 0 && player.equals(drawTarget)) {
+            int count = acceptDrawPenalty(player);
+            this.lastDrawResult = new DrawResult(Optional.empty(), false, count);
+            return this.lastDrawResult;
+        }
+
+        if (actionDefendingEnabled && pendingSkipDeflection && player.equals(skipTarget)) {
+            Optional<Card> drawn = drawCardFromDeck();
+            drawn.ifPresent(player.getHand()::addCard);
+            pendingSkipDeflection = false;
+            skipTarget = null;
+            turnManager.advanceTurn(1);
+            this.hasDrawnThisTurn = false;
+            this.lastDrawResult = new DrawResult(drawn, false, 1);
+            return this.lastDrawResult;
         }
 
         if (hasDrawnThisTurn) {
-            return Optional.empty();
+            this.lastDrawResult = new DrawResult(Optional.empty(), false, 0);
+            return this.lastDrawResult;
         }
 
         // When a turn starts, window to catch previous Ultimo violator closes
@@ -437,16 +631,50 @@ public class UltimoEngine {
         }
 
         Optional<Card> drawn = drawCardFromDeck();
-        drawn.ifPresent(card -> {
-            player.getHand().addCard(card);
-            this.hasDrawnThisTurn = true;
-        });
+        if (drawn.isEmpty()) {
+            this.lastDrawResult = new DrawResult(Optional.empty(), false, 0);
+            return this.lastDrawResult;
+        }
 
-        return drawn;
+        player.getHand().addCard(drawn.get());
+        this.hasDrawnThisTurn = true;
+
+        if (autoPassEnabled) {
+            Card topCard = discardPile.getTopCard().orElse(null);
+            CardColor activeColor = discardPile.getActiveColor();
+            boolean hasAnyPlayable = MoveValidator.hasPlayableCard(player.getHand(), topCard, activeColor);
+            if (!hasAnyPlayable) {
+                passTurn(player);
+                this.lastDrawResult = new DrawResult(drawn, true, 1);
+                return this.lastDrawResult;
+            }
+        }
+
+        this.lastDrawResult = new DrawResult(drawn, false, 1);
+        return this.lastDrawResult;
     }
 
     /**
-     * Passes the turn after drawing a card.
+     * Draws one card from the draw pile for the active player.
+     */
+    public Optional<Card> drawCard(Player player) {
+        return drawCardWithResult(player).card();
+    }
+
+    public DrawResult draw(Player player) {
+        return drawCardWithResult(player);
+    }
+
+    public DrawResult getLastDrawResult() {
+        return lastDrawResult;
+    }
+
+    public boolean wasLastDrawAutoPassed() {
+        return lastDrawResult != null && lastDrawResult.autoPassed();
+    }
+
+    /**
+     * Passes the turn after drawing a card, or yields to a pending skip/draw penalty.
      */
     public boolean passTurn(Player player) {
         if (!isGameStarted || isGameOver) {
@@ -456,7 +684,16 @@ public class UltimoEngine {
             return false;
         }
 
-        if (resolvePendingWildChallengeIfAny(player)) {
+        if (pendingWildChallenge != null && player.equals(pendingWildChallenge.victim())) {
+            return acceptWildFour(player);
+        }
+
+        if (actionDefendingEnabled && pendingSkipDeflection && player.equals(skipTarget)) {
+            return acceptSkip(player);
+        }
+
+        if (actionDefendingEnabled && pendingDrawPenalty > 0 && player.equals(drawTarget)) {
+            acceptDrawPenalty(player);
             return true;
         }
 
@@ -464,7 +701,11 @@ public class UltimoEngine {
             return false;
         }
 
-        turnManager.advanceTurn();
+        if (pendingUltimoViolator != null && !player.getUsername().equalsIgnoreCase(pendingUltimoViolator)) {
+            pendingUltimoViolator = null;
+        }
+
+        turnManager.advanceTurn(1);
         this.hasDrawnThisTurn = false;
         return true;
     }
@@ -486,7 +727,8 @@ public class UltimoEngine {
                 Collections.unmodifiableMap(cardCounts),
                 deck.size(),
                 isGameOver,
-                winner != null ? winner.getUsername() : null
+                winner != null ? winner.getUsername() : null,
+                List.copyOf(matchStandings)
         );
     }
 
@@ -538,8 +780,21 @@ public class UltimoEngine {
         int count = cards.size();
         Card lastCard = cards.get(cards.size() - 1);
         switch (lastCard.value()) {
-            case SKIP -> turnManager.advanceTurn(1 + count);
+            case SKIP -> {
+                if (actionDefendingEnabled) {
+                    this.pendingSkipDeflection = true;
+                    this.skipTarget = turnManager.peekNextPlayer();
+                    turnManager.advanceTurn(1);
+                } else {
+                    turnManager.advanceTurn(1 + count);
+                }
+            }
             case REVERSE -> {
+                this.pendingSkipDeflection = false;
+                this.skipTarget = null;
+                this.pendingDrawPenalty = 0;
+                this.pendingDrawType = null;
+                this.drawTarget = null;
                 if (turnManager.isTwoPlayerGame()) {
                     if (count % 2 == 1) {
                         turnManager.advanceTurn(2);
@@ -554,17 +809,39 @@ public class UltimoEngine {
                 }
             }
             case DRAW_TWO -> {
-                Player victim = turnManager.peekNextPlayer();
-                drawCardsFor(victim, 2 * count);
-                turnManager.skipTurn();
+                if (actionDefendingEnabled) {
+                    this.pendingDrawPenalty += 2 * count;
+                    this.pendingDrawType = CardValue.DRAW_TWO;
+                    this.drawTarget = turnManager.peekNextPlayer();
+                    turnManager.advanceTurn(1);
+                } else {
+                    Player victim = turnManager.peekNextPlayer();
+                    drawCardsFor(victim, 2 * count);
+                    turnManager.skipTurn();
+                }
             }
             case WILD_DRAW_FOUR -> {
-                Player victim = turnManager.peekNextPlayer();
-                // Set pending challenge instead of immediately drawing to give victim the option to challenge
-                this.pendingWildChallenge = new PendingWildFourChallenge(player, victim, wasIllegalWildFour, 4 * count);
-                turnManager.advanceTurn(1);
+                if (actionDefendingEnabled) {
+                    this.pendingDrawPenalty += 4 * count;
+                    this.pendingDrawType = CardValue.WILD_DRAW_FOUR;
+                    this.drawTarget = turnManager.peekNextPlayer();
+                    this.pendingWildChallenge = new PendingWildFourChallenge(player, drawTarget, wasIllegalWildFour, pendingDrawPenalty);
+                    turnManager.advanceTurn(1);
+                } else {
+                    Player victim = turnManager.peekNextPlayer();
+                    // Set pending challenge instead of immediately drawing to give victim the option to challenge
+                    this.pendingWildChallenge = new PendingWildFourChallenge(player, victim, wasIllegalWildFour, 4 * count);
+                    turnManager.advanceTurn(1);
+                }
             }
-            case WILD, ZERO, ONE, TWO, THREE, FOUR, FIVE, SIX, SEVEN, EIGHT, NINE -> turnManager.advanceTurn();
+            case WILD, ZERO, ONE, TWO, THREE, FOUR, FIVE, SIX, SEVEN, EIGHT, NINE -> {
+                this.pendingSkipDeflection = false;
+                this.skipTarget = null;
+                this.pendingDrawPenalty = 0;
+                this.pendingDrawType = null;
+                this.drawTarget = null;
+                turnManager.advanceTurn();
+            }
         }
     }
 
@@ -637,4 +914,83 @@ public class UltimoEngine {
     public String getPendingUltimoViolator() {
         return pendingUltimoViolator;
     }
+
+    public boolean isActionDefendingEnabled() {
+        return actionDefendingEnabled;
+    }
+
+    public void setActionDefendingEnabled(boolean actionDefendingEnabled) {
+        this.actionDefendingEnabled = actionDefendingEnabled;
+    }
+
+    public boolean isAutoPassEnabled() {
+        return autoPassEnabled;
+    }
+
+    public void setAutoPassEnabled(boolean autoPassEnabled) {
+        this.autoPassEnabled = autoPassEnabled;
+    }
+
+    public boolean isPendingSkipDeflection() {
+        return pendingSkipDeflection;
+    }
+
+    public Player getSkipTarget() {
+        return skipTarget;
+    }
+
+    public int getPendingDrawPenalty() {
+        return pendingDrawPenalty;
+    }
+
+    public CardValue getPendingDrawType() {
+        return pendingDrawType;
+    }
+
+    public Player getDrawTarget() {
+        return drawTarget;
+    }
+
+    /**
+     * Removes a player from the game engine (e.g. upon disconnect timeout or forfeit).
+     * If the removed player was the active player, the turn advances to the next player.
+     * If only one player remains, the game finishes with forfeit victory.
+     *
+     * @param player the player to remove
+     * @return true if the removed player was currently taking their turn
+     */
+    public synchronized boolean removePlayer(Player player) {
+        if (player == null) {
+            return false;
+        }
+        boolean wasCurrent = turnManager.removePlayer(player);
+        players.remove(player);
+        ultimoDeclared.remove(player.getUsername());
+        if (pendingUltimoViolator != null && pendingUltimoViolator.equalsIgnoreCase(player.getUsername())) {
+            pendingUltimoViolator = null;
+        }
+        if (hasDrawnThisTurn && wasCurrent) {
+            hasDrawnThisTurn = false;
+        }
+        if (players.size() <= 1 && isGameStarted && !isGameOver) {
+            isGameOver = true;
+            if (players.size() == 1) {
+                winner = players.getFirst();
+            }
+        }
+        return wasCurrent;
+    }
+
+    public int getActivePlayersCount() {
+        return turnManager.getActivePlayerCount();
+    }
+
+    public List<Player> getFinishedPlayers() {
+        return Collections.unmodifiableList(finishedPlayers);
+    }
+
+    public List<ServerEvent.Placement> getMatchStandings() {
+        return Collections.unmodifiableList(matchStandings);
+    }
 }
+
