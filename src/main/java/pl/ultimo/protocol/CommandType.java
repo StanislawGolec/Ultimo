@@ -13,5 +13,9 @@ public enum CommandType {
     START,
     ULTIMO,
     CATCH_ULTIMO,
-    CHALLENGE_WILD_FOUR;
+    CHALLENGE_WILD_FOUR,
+    CREATE_ROOM,
+    LIST_ROOMS,
+    KICK,
+    TRANSFER_OWNERSHIP;
 }

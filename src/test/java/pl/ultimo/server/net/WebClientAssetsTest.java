@@ -27,6 +27,15 @@ class WebClientAssetsTest {
         // Card icon indicator
         assertTrue(html.contains("🂠"), "HTML must render card symbols in opponent badge");
 
+        // Room creation and browsing UI elements
+        assertTrue(html.contains("createRoomModal"), "HTML must contain createRoomModal");
+        assertTrue(html.contains("roomBrowserModal"), "HTML must contain roomBrowserModal");
+        assertTrue(html.contains("btn-create"), "HTML must contain Create Room button");
+        assertTrue(html.contains("btn-browse"), "HTML must contain Browse button");
+        assertTrue(html.contains("host-badge"), "HTML must contain host badge");
+        assertTrue(html.contains("btn-kick"), "HTML must contain host kick button");
+        assertTrue(html.contains("btn-promote"), "HTML must contain host transfer ownership button");
+
         // UTF-8 byte serialization
         byte[] bytes = WebClientAssets.INDEX_HTML_BYTES;
         assertNotNull(bytes);

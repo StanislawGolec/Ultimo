@@ -12,13 +12,17 @@ public sealed interface ClientCommand {
 
     CommandType type();
 
-    record Join(String username, String roomId, Integer maxPlayers) implements ClientCommand {
+    record Join(String username, String roomId, Integer maxPlayers, String accessCode) implements ClientCommand {
         public Join(String username) {
-            this(username, null, null);
+            this(username, null, null, null);
         }
 
         public Join(String username, String roomId) {
-            this(username, roomId, null);
+            this(username, roomId, null, null);
+        }
+
+        public Join(String username, String roomId, Integer maxPlayers) {
+            this(username, roomId, maxPlayers, null);
         }
 
         @Override
@@ -95,6 +99,42 @@ public sealed interface ClientCommand {
         @Override
         public CommandType type() {
             return CommandType.CHALLENGE_WILD_FOUR;
+        }
+    }
+
+    record CreateRoom(String name, RoomVisibility visibility, String accessCode, Integer maxPlayers) implements ClientCommand {
+        public CreateRoom(String name) {
+            this(name, RoomVisibility.PUBLIC, null, null);
+        }
+
+        public CreateRoom(String name, RoomVisibility visibility) {
+            this(name, visibility, null, null);
+        }
+
+        @Override
+        public CommandType type() {
+            return CommandType.CREATE_ROOM;
+        }
+    }
+
+    record ListRooms() implements ClientCommand {
+        @Override
+        public CommandType type() {
+            return CommandType.LIST_ROOMS;
+        }
+    }
+
+    record Kick(String targetPlayer) implements ClientCommand {
+        @Override
+        public CommandType type() {
+            return CommandType.KICK;
+        }
+    }
+
+    record TransferOwnership(String targetPlayer) implements ClientCommand {
+        @Override
+        public CommandType type() {
+            return CommandType.TRANSFER_OWNERSHIP;
         }
     }
 }

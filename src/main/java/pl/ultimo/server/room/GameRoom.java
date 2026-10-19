@@ -7,6 +7,7 @@ import pl.ultimo.core.model.Card;
 import pl.ultimo.core.model.Player;
 import pl.ultimo.core.state.GameState;
 import pl.ultimo.protocol.ClientCommand;
+import pl.ultimo.protocol.RoomVisibility;
 import pl.ultimo.protocol.ServerEvent;
 import pl.ultimo.server.metrics.MetricsRegistry;
 import pl.ultimo.server.net.ClientSession;
@@ -23,6 +24,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Consumer;
 
 /**
  * Encapsulates an active multiplayer Ultimo game match.
@@ -33,8 +35,12 @@ import java.util.concurrent.locks.ReentrantLock;
 public class GameRoom implements Runnable {
 
     private final String roomId;
+    private final String roomName;
+    private final RoomVisibility visibility;
+    private final String accessCode;
     private final int maxPlayers;
     private final Random random;
+    private final Consumer<ClientSession> onPlayerLeave;
     private final ReentrantLock roomLock = new ReentrantLock();
 
     private final List<ClientSession> sessions = new ArrayList<>();
@@ -43,6 +49,7 @@ public class GameRoom implements Runnable {
     private final BlockingQueue<RoomCommandEvent> commandQueue = new LinkedBlockingQueue<>();
     private final AtomicBoolean isRunning = new AtomicBoolean(true);
 
+    private volatile String ownerUsername;
     private volatile RoomState state = RoomState.WAITING_FOR_PLAYERS;
     private UltimoEngine engine;
 
@@ -56,12 +63,38 @@ public class GameRoom implements Runnable {
     }
 
     public GameRoom(String roomId, int maxPlayers, Random random) {
+        this(roomId, roomId, RoomVisibility.PUBLIC, null, maxPlayers, random, null);
+    }
+
+    public GameRoom(String roomId, String roomName, RoomVisibility visibility, String accessCode, int maxPlayers) {
+        this(roomId, roomName, visibility, accessCode, maxPlayers, new Random(), null);
+    }
+
+    public GameRoom(String roomId, String roomName, RoomVisibility visibility, String accessCode, int maxPlayers, Random random) {
+        this(roomId, roomName, visibility, accessCode, maxPlayers, random, null);
+    }
+
+    public GameRoom(String roomId, String roomName, RoomVisibility visibility, String accessCode, int maxPlayers, Random random, Consumer<ClientSession> onPlayerLeave) {
         this.roomId = Objects.requireNonNull(roomId, "roomId must not be null");
+        this.roomName = (roomName != null && !roomName.isBlank()) ? roomName.trim() : roomId;
+        this.visibility = visibility != null ? visibility : RoomVisibility.PUBLIC;
+        this.accessCode = (accessCode != null && !accessCode.isBlank()) ? accessCode.trim() : null;
         if (maxPlayers < MIN_CAPACITY || maxPlayers > MAX_CAPACITY) {
             throw new IllegalArgumentException("Room capacity must be between " + MIN_CAPACITY + " and " + MAX_CAPACITY + " players");
         }
         this.maxPlayers = maxPlayers;
         this.random = Objects.requireNonNull(random, "random must not be null");
+        this.onPlayerLeave = onPlayerLeave;
+    }
+
+    public boolean validateAccess(String code) {
+        if (visibility != RoomVisibility.PRIVATE) {
+            return true;
+        }
+        if (this.accessCode == null || this.accessCode.isBlank()) {
+            return true;
+        }
+        return this.accessCode.equals(code != null ? code.trim() : null);
     }
 
     /**
@@ -79,17 +112,27 @@ public class GameRoom implements Runnable {
         }
     }
 
+    public boolean addPlayer(ClientSession session, String username) {
+        return addPlayer(session, username, null);
+    }
+
     /**
      * Enrolls a player into the room if capacity is not exceeded, match hasn't started,
-     * and username is unique in this room.
+     * username is unique in this room, and access code is valid (if private).
      */
-    public boolean addPlayer(ClientSession session, String username) {
+    public boolean addPlayer(ClientSession session, String username, String code) {
         Objects.requireNonNull(session, "session must not be null");
         Objects.requireNonNull(username, "username must not be null");
+
+        if (!validateAccess(code)) {
+            session.sendEvent(new ServerEvent.ErrorEvent("INVALID_ACCESS_CODE: Room is private and requires valid access code"));
+            return false;
+        }
 
         List<String> playerNamesSnapshot;
         int currentCount;
         boolean shouldStart = false;
+        String currentOwner;
 
         roomLock.lock();
         try {
@@ -103,10 +146,14 @@ public class GameRoom implements Runnable {
             }
 
             Player player = new Player(session.getSessionId(), username);
+            if (players.isEmpty()) {
+                this.ownerUsername = player.getUsername();
+            }
             players.add(player);
             sessions.add(session);
             sessionPlayerMap.put(session.getSessionId(), player);
 
+            currentOwner = this.ownerUsername;
             currentCount = players.size();
             playerNamesSnapshot = players.stream().map(Player::getUsername).toList();
             if (currentCount == maxPlayers) {
@@ -117,6 +164,9 @@ public class GameRoom implements Runnable {
         }
 
         broadcast(new ServerEvent.RoomStatus(roomId, currentCount, maxPlayers, playerNamesSnapshot));
+        if (this.accessCode != null && !this.accessCode.isBlank()) {
+            session.sendEvent(new ServerEvent.ChatBroadcast("GAME", "Room Access Code: " + accessCode));
+        }
 
         // Auto-start match when room is completely filled
         if (shouldStart) {
@@ -182,6 +232,8 @@ public class GameRoom implements Runnable {
 
             switch (command) {
                 case ClientCommand.Start start -> handleStart(session);
+                case ClientCommand.Kick kick -> handleKick(session, kick);
+                case ClientCommand.TransferOwnership to -> handleTransferOwnership(session, to);
                 case ClientCommand.Play play -> handlePlay(session, player, play);
                 case ClientCommand.Draw draw -> handleDraw(session, player);
                 case ClientCommand.Pass pass -> handlePass(session, player);
@@ -199,6 +251,12 @@ public class GameRoom implements Runnable {
     }
 
     private void handleStart(ClientSession session) {
+        Player caller = sessionPlayerMap.get(session.getSessionId());
+        if (caller == null || ownerUsername == null || !caller.getUsername().equalsIgnoreCase(ownerUsername)) {
+            session.sendEvent(new ServerEvent.ErrorEvent("Only room owner can perform this action"));
+            return;
+        }
+
         if (state == RoomState.IN_PROGRESS) {
             session.sendEvent(new ServerEvent.ErrorEvent("Match is already in progress"));
             return;
@@ -215,6 +273,76 @@ public class GameRoom implements Runnable {
         }
 
         startGame();
+    }
+
+    private void handleKick(ClientSession session, ClientCommand.Kick kick) {
+        Player caller = sessionPlayerMap.get(session.getSessionId());
+        if (caller == null || ownerUsername == null || !caller.getUsername().equalsIgnoreCase(ownerUsername)) {
+            session.sendEvent(new ServerEvent.ErrorEvent("Only room owner can perform this action"));
+            return;
+        }
+        String targetName = kick.targetPlayer();
+        if (targetName == null || targetName.isBlank() || targetName.equalsIgnoreCase(ownerUsername)) {
+            session.sendEvent(new ServerEvent.ErrorEvent("Cannot kick yourself or empty target"));
+            return;
+        }
+        ClientSession targetSession = null;
+        Player targetPlayer = null;
+        roomLock.lock();
+        try {
+            for (int i = 0; i < players.size() && i < sessions.size(); i++) {
+                if (players.get(i).getUsername().equalsIgnoreCase(targetName.trim())) {
+                    targetPlayer = players.get(i);
+                    targetSession = sessions.get(i);
+                    break;
+                }
+            }
+        } finally {
+            roomLock.unlock();
+        }
+
+        if (targetPlayer == null || targetSession == null) {
+            session.sendEvent(new ServerEvent.ErrorEvent("Player '" + targetName + "' not found in room"));
+            return;
+        }
+
+        targetSession.sendEvent(new ServerEvent.ErrorEvent("You have been kicked from the room by the host"));
+        broadcast(new ServerEvent.ChatBroadcast("GAME", targetPlayer.getUsername() + " was kicked by the room owner."));
+        handleDisconnect(targetSession);
+    }
+
+    private void handleTransferOwnership(ClientSession session, ClientCommand.TransferOwnership to) {
+        Player caller = sessionPlayerMap.get(session.getSessionId());
+        if (caller == null || ownerUsername == null || !caller.getUsername().equalsIgnoreCase(ownerUsername)) {
+            session.sendEvent(new ServerEvent.ErrorEvent("Only room owner can perform this action"));
+            return;
+        }
+        String targetName = to.targetPlayer();
+        if (targetName == null || targetName.isBlank() || targetName.equalsIgnoreCase(ownerUsername)) {
+            session.sendEvent(new ServerEvent.ErrorEvent("Cannot transfer ownership to yourself"));
+            return;
+        }
+        boolean found = false;
+        roomLock.lock();
+        try {
+            for (Player p : players) {
+                if (p.getUsername().equalsIgnoreCase(targetName.trim())) {
+                    this.ownerUsername = p.getUsername();
+                    found = true;
+                    break;
+                }
+            }
+        } finally {
+            roomLock.unlock();
+        }
+
+        if (!found) {
+            session.sendEvent(new ServerEvent.ErrorEvent("Player '" + targetName + "' not found in room"));
+            return;
+        }
+
+        broadcast(new ServerEvent.RoomOwnerChanged(this.ownerUsername));
+        broadcast(new ServerEvent.ChatBroadcast("GAME", "Room ownership transferred to " + this.ownerUsername));
     }
 
     private void handlePlay(ClientSession session, Player player, ClientCommand.Play play) {
@@ -236,6 +364,22 @@ public class GameRoom implements Runnable {
         if (play.cards().size() > 1) {
             broadcast(new ServerEvent.ChatBroadcast("GAME",
                     player.getUsername() + " played a combo of " + play.cards().size() + " cards!"));
+        }
+
+        if (!result.isGameOver() && !play.cards().isEmpty()) {
+            Card lastPlayed = play.cards().get(play.cards().size() - 1);
+            if (lastPlayed.value() == pl.ultimo.core.model.CardValue.DRAW_TWO) {
+                int cardsCount = 2 * play.cards().size();
+                broadcast(new ServerEvent.ChatBroadcast("GAME",
+                        "PENALTY STACK: +" + cardsCount + " CARDS! Targeted at " + engine.getTurnManager().getCurrentPlayer().getUsername()));
+            } else if (lastPlayed.value() == pl.ultimo.core.model.CardValue.WILD_DRAW_FOUR) {
+                int cardsCount = 4 * play.cards().size();
+                broadcast(new ServerEvent.ChatBroadcast("GAME",
+                        "PENALTY STACK: +" + cardsCount + " CARDS! Targeted at " + engine.getTurnManager().getCurrentPlayer().getUsername()));
+            } else if (lastPlayed.value() == pl.ultimo.core.model.CardValue.SKIP) {
+                broadcast(new ServerEvent.ChatBroadcast("GAME",
+                        "SKIP DEFLECTED! Shifted to " + engine.getTurnManager().getCurrentPlayer().getUsername() + "!"));
+            }
         }
 
         if (result.isUltimo()) {
@@ -448,6 +592,7 @@ public class GameRoom implements Runnable {
         int remainingCount;
         Player winner = null;
         RoomState currentState;
+        String nextOwner = null;
 
         roomLock.lock();
         try {
@@ -464,6 +609,16 @@ public class GameRoom implements Runnable {
             remainingCount = players.size();
             playerNamesSnapshot = players.stream().map(Player::getUsername).toList();
 
+            boolean wasOwner = ownerUsername != null && leavingPlayer.getUsername().equalsIgnoreCase(ownerUsername);
+            if (wasOwner) {
+                if (!players.isEmpty()) {
+                    this.ownerUsername = players.getFirst().getUsername();
+                    nextOwner = this.ownerUsername;
+                } else {
+                    this.ownerUsername = null;
+                }
+            }
+
             if (currentState == RoomState.IN_PROGRESS && remainingCount == 1) {
                 this.state = RoomState.FINISHED;
                 winner = players.getFirst();
@@ -472,6 +627,17 @@ public class GameRoom implements Runnable {
             }
         } finally {
             roomLock.unlock();
+        }
+
+        if (onPlayerLeave != null) {
+            try {
+                onPlayerLeave.accept(session);
+            } catch (Exception ignored) {}
+        }
+
+        if (nextOwner != null) {
+            broadcast(new ServerEvent.RoomOwnerChanged(nextOwner));
+            broadcast(new ServerEvent.ChatBroadcast("GAME", "Host left. Ownership transferred to " + nextOwner));
         }
 
         if (currentState == RoomState.WAITING_FOR_PLAYERS) {
@@ -525,6 +691,26 @@ public class GameRoom implements Runnable {
 
     public String getRoomId() {
         return roomId;
+    }
+
+    public String getRoomName() {
+        return roomName;
+    }
+
+    public RoomVisibility getVisibility() {
+        return visibility;
+    }
+
+    public String getAccessCode() {
+        return accessCode;
+    }
+
+    public String getOwnerUsername() {
+        return ownerUsername;
+    }
+
+    public boolean isPrivate() {
+        return visibility == RoomVisibility.PRIVATE;
     }
 
     public RoomState getState() {

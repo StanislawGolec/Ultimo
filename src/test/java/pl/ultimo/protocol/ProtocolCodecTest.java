@@ -350,4 +350,85 @@ class ProtocolCodecTest {
         assertInstanceOf(ServerEvent.DrawResult.class, draw);
         assertEquals(new Card(CardColor.YELLOW, CardValue.DRAW_TWO), ((ServerEvent.DrawResult) draw).drawnCard());
     }
+
+    @Test
+    @DisplayName("Should decode and encode CREATE_ROOM for public and private rooms")
+    void shouldDecodeAndEncodeCreateRoom() throws ProtocolException {
+        // Public room with capacity
+        ClientCommand cmd1 = ProtocolCodec.decodeCommand("CREATE_ROOM Casual PUBLIC 8");
+        assertInstanceOf(ClientCommand.CreateRoom.class, cmd1);
+        ClientCommand.CreateRoom cr1 = (ClientCommand.CreateRoom) cmd1;
+        assertEquals("Casual", cr1.name());
+        assertEquals(RoomVisibility.PUBLIC, cr1.visibility());
+        assertNull(cr1.accessCode());
+        assertEquals(8, cr1.maxPlayers());
+        assertEquals("CREATE_ROOM Casual PUBLIC 8\n", ProtocolCodec.encodeCommand(cr1));
+
+        // Private room with access code and capacity
+        ClientCommand cmd2 = ProtocolCodec.decodeCommand("CREATE_ROOM SecretTable PRIVATE 1234 6");
+        assertInstanceOf(ClientCommand.CreateRoom.class, cmd2);
+        ClientCommand.CreateRoom cr2 = (ClientCommand.CreateRoom) cmd2;
+        assertEquals("SecretTable", cr2.name());
+        assertEquals(RoomVisibility.PRIVATE, cr2.visibility());
+        assertEquals("1234", cr2.accessCode());
+        assertEquals(6, cr2.maxPlayers());
+        assertEquals("CREATE_ROOM SecretTable PRIVATE 1234 6\n", ProtocolCodec.encodeCommand(cr2));
+    }
+
+    @Test
+    @DisplayName("Should decode and encode LIST_ROOMS, KICK, and TRANSFER_OWNERSHIP")
+    void shouldDecodeAndEncodeRoomManagementCommands() throws ProtocolException {
+        ClientCommand list = ProtocolCodec.decodeCommand("LIST_ROOMS");
+        assertInstanceOf(ClientCommand.ListRooms.class, list);
+        assertEquals("LIST_ROOMS\n", ProtocolCodec.encodeCommand(list));
+
+        ClientCommand kick = ProtocolCodec.decodeCommand("KICK BadPlayer");
+        assertInstanceOf(ClientCommand.Kick.class, kick);
+        assertEquals("BadPlayer", ((ClientCommand.Kick) kick).targetPlayer());
+        assertEquals("KICK BadPlayer\n", ProtocolCodec.encodeCommand(kick));
+
+        ClientCommand to = ProtocolCodec.decodeCommand("TRANSFER_OWNERSHIP NewHost");
+        assertInstanceOf(ClientCommand.TransferOwnership.class, to);
+        assertEquals("NewHost", ((ClientCommand.TransferOwnership) to).targetPlayer());
+        assertEquals("TRANSFER_OWNERSHIP NewHost\n", ProtocolCodec.encodeCommand(to));
+    }
+
+    @Test
+    @DisplayName("Should decode and encode ROOM_OWNER_CHANGED and ROOM_LIST events")
+    void shouldDecodeAndEncodeRoomEvents() throws ProtocolException {
+        ServerEvent roc = ProtocolCodec.decodeEvent("ROOM_OWNER_CHANGED Alice\n");
+        assertInstanceOf(ServerEvent.RoomOwnerChanged.class, roc);
+        assertEquals("Alice", ((ServerEvent.RoomOwnerChanged) roc).newOwner());
+        assertEquals("ROOM_OWNER_CHANGED Alice\n", ProtocolCodec.encodeEvent(roc));
+
+        // ROOM_LIST with rooms
+        ServerEvent rl = ProtocolCodec.decodeEvent("ROOM_LIST room-1:Lobby_One:2/4:WAITING room-2:HighStakes:5/16:IN_PROGRESS\n");
+        assertInstanceOf(ServerEvent.RoomList.class, rl);
+        ServerEvent.RoomList roomList = (ServerEvent.RoomList) rl;
+        assertEquals(2, roomList.rooms().size());
+        assertEquals("room-1", roomList.rooms().get(0).roomId());
+        assertEquals("Lobby_One", roomList.rooms().get(0).name());
+        assertEquals(2, roomList.rooms().get(0).currentPlayers());
+        assertEquals(4, roomList.rooms().get(0).maxPlayers());
+        assertEquals("WAITING", roomList.rooms().get(0).status());
+
+        // Empty ROOM_LIST
+        ServerEvent emptyRl = ProtocolCodec.decodeEvent("ROOM_LIST -\n");
+        assertInstanceOf(ServerEvent.RoomList.class, emptyRl);
+        assertTrue(((ServerEvent.RoomList) emptyRl).rooms().isEmpty());
+        assertEquals("ROOM_LIST -\n", ProtocolCodec.encodeEvent(emptyRl));
+    }
+
+    @Test
+    @DisplayName("Should decode and encode JOIN command with access code")
+    void shouldDecodeAndEncodeJoinWithAccessCode() throws ProtocolException {
+        ClientCommand cmd = ProtocolCodec.decodeCommand("JOIN Alice room-99 4321 8");
+        assertInstanceOf(ClientCommand.Join.class, cmd);
+        ClientCommand.Join join = (ClientCommand.Join) cmd;
+        assertEquals("Alice", join.username());
+        assertEquals("room-99", join.roomId());
+        assertEquals("4321", join.accessCode());
+        assertEquals(8, join.maxPlayers());
+        assertEquals("JOIN Alice room-99 4321 8\n", ProtocolCodec.encodeCommand(join));
+    }
 }

@@ -2,7 +2,7 @@
 
 [![Java Version](https://img.shields.io/badge/Java-21%20LTS-orange.svg)](https://openjdk.org/projects/jdk/21/)
 [![Virtual Threads](https://img.shields.io/badge/Concurrency-Virtual%20Threads%20%28Loom%29-blue.svg)](https://openjdk.org/jeps/444)
-[![Tests](https://img.shields.io/badge/Tests-186%2F186%20Passing%20%28100%25%29-brightgreen.svg)](https://junit.org/junit5/)
+[![Tests](https://img.shields.io/badge/Tests-208%2F208%20Passing%20%28100%25%29-brightgreen.svg)](https://junit.org/junit5/)
 [![WebSockets](https://img.shields.io/badge/WebSockets-RFC%206455%20Pure%20Java-9cf.svg)](#web-client--browser-gameplay)
 [![Dependencies](https://img.shields.io/badge/Runtime%20Dependencies-0%20%28Pure%20Java%20StdLib%29-success.svg)](#architectural-highlights)
 [![Docker](https://img.shields.io/badge/Docker-Multi--stage%20Alpine-2496ED.svg)](https://www.docker.com/)
@@ -184,11 +184,18 @@ The protocol is bidirectional, UTF-8 encoded, and line-delimited with `\n`.
 
 | Command | Arguments | Description | Example |
 | :--- | :--- | :--- | :--- |
-| `JOIN` | `<username>` | Registers session identity and enters matchmaking | `JOIN Alice` |
-| `START` | _(none)_ | Starts match manually when at least 2 players are in lobby | `START` |
+| `JOIN` | `<username> [room_id] [code] [cap]` | Registers session identity and enters matchmaking | `JOIN Alice` |
+| `CREATE_ROOM` | `<name> <PUBLIC\|PRIVATE> [code] [cap]` | Creates a targeted public or private room | `CREATE_ROOM VIP PRIVATE 1234 4` |
+| `LIST_ROOMS` | _(none)_ | Requests live list of active public rooms | `LIST_ROOMS` |
+| `START` | _(none)_ | Host starts match when at least 2 players in room | `START` |
+| `KICK` | `<target_player>` | Host removes a player from the room | `KICK Bob` |
+| `TRANSFER_OWNERSHIP` | `<target_player>` | Host transfers ownership privilege | `TRANSFER_OWNERSHIP Bob` |
 | `PLAY` | `<card_token> [color]` | Plays a card from hand (color mandatory for wild cards) | `PLAY RED_7`<br/>`PLAY WILD_WILD BLUE` |
 | `DRAW` | _(none)_ | Draws a card from the deck | `DRAW` |
 | `PASS` | _(none)_ | Passes turn after drawing | `PASS` |
+| `ULTIMO` | _(none)_ | Declares penultimate card in hand | `ULTIMO` |
+| `CATCH_ULTIMO` | `<target_player>` | Challenges undeclared single card | `CATCH_ULTIMO Bob` |
+| `CHALLENGE_WILD_FOUR` | _(none)_ | Challenges previous Wild Draw Four play legality | `CHALLENGE_WILD_FOUR` |
 | `CHAT` | `<message>` | Broadcasts a chat message to room participants | `CHAT Good game!` |
 | `PING` | _(none)_ | Heartbeat probe | `PING` |
 | `QUIT` | _(none)_ | Gracefully leaves room and disconnects | `QUIT` |
@@ -199,11 +206,15 @@ The protocol is bidirectional, UTF-8 encoded, and line-delimited with `\n`.
 | :--- | :--- | :--- |
 | `WELCOME` | `WELCOME <session_id> <message>` | Acknowledges connection and registration |
 | `ROOM_STATUS`| `ROOM_STATUS <roomId> <current> <max> <p1,p2...>` | Broadcasts lobby status and connected players |
+| `ROOM_LIST` | `ROOM_LIST <count> [rooms...]` | Reports available public rooms |
+| `ROOM_OWNER_CHANGED` | `ROOM_OWNER_CHANGED <new_owner>` | Broadcasts host transfer |
 | `TOP_CARD` | `TOP_CARD <card_token> <active_color>` | Updates active discard card and table color |
 | `TURN_ANNOUNCED` | `TURN_ANNOUNCED <active_player_name>` | Announces which player has the current turn |
 | `HAND_UPDATE`| `HAND_UPDATE <card1> <card2> ...` | Sends player's private hand (Fog of War) |
 | `OPPONENT_UPDATE`| `OPPONENT_UPDATE <opponent_name> <count>` | Broadcasts opponent's updated card count |
 | `DRAW_RESULT`| `DRAW_RESULT <card_token>` | Reports card drawn to drawer |
+| `ULTIMO_ANNOUNCED` | `ULTIMO_ANNOUNCED <player_name>` | Broadcasts Ultimo declaration |
+| `CHALLENGE_RESULT` | `CHALLENGE_RESULT <challenger> <target> <GUILTY\|INNOCENT> <draws>` | Challenge outcome |
 | `CHAT_BROADCAST` | `CHAT_BROADCAST <sender> <message>` | Relays broadcast chat message or system alert |
 | `GAME_OVER` | `GAME_OVER <winner_name>` | Declares match conclusion and winner name |
 | `ERROR` | `ERROR <message>` | Reports syntax, domain, or turn validation error |

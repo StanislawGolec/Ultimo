@@ -355,6 +355,19 @@ public class TerminalClientApp {
                 }
                 System.out.println("============================================================\n");
             }
+            case ServerEvent.RoomOwnerChanged roc -> {
+                System.out.println("\n[LOBBY] Właściciel pokoju (Host): " + roc.newOwner());
+            }
+            case ServerEvent.RoomList roomList -> {
+                System.out.println("\n[POKOJE PUBLICZNE]");
+                if (roomList.rooms().isEmpty()) {
+                    System.out.println("  Brak dostępnych otwartych pokojów.");
+                } else {
+                    for (ServerEvent.RoomEntry r : roomList.rooms()) {
+                        System.out.println("  - " + r.roomId() + " (" + r.name() + "): " + r.currentPlayers() + "/" + r.maxPlayers() + " [" + r.status() + "]");
+                    }
+                }
+            }
             case ServerEvent.Pong ignored -> {}
         }
     }

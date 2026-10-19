@@ -53,7 +53,19 @@ public final class WebClientAssets {
     .btn-pass { background: #475569; }
     .btn-pass:hover:not(:disabled) { background: #334155; }
     .btn-start { background: #16a34a; }
-    .btn-start:hover:not(:disabled) { background: #15803d; }
+    .btn-create { background: #8b5cf6; }
+    .btn-create:hover:not(:disabled) { background: #7c3aed; }
+    .btn-browse { background: #0284c7; }
+    .btn-browse:hover:not(:disabled) { background: #0369a1; }
+    .btn-kick { background: #ef4444; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; margin-left: 6px; cursor: pointer; border: none; }
+    .btn-kick:hover { background: #dc2626; }
+    .btn-promote { background: #eab308; color: black; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; margin-left: 4px; cursor: pointer; border: none; font-weight: bold; }
+    .btn-promote:hover { background: #ca8a04; }
+    .host-badge { background: #eab308; color: #0f172a; font-weight: 800; font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; margin-left: 4px; }
+    .room-table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 0.9rem; text-align: left; }
+    .room-table th, .room-table td { padding: 8px 12px; border-bottom: 1px solid #334155; }
+    .room-table th { background: #0f172a; color: #94a3b8; }
+    .modal select, .modal input[type="text"] { background: #0f172a; border: 1px solid #475569; color: white; padding: 8px 12px; border-radius: 6px; outline: none; }
     main { flex: 1; display: grid; grid-template-columns: 1fr 340px; gap: 16px; padding: 16px; max-width: 1400px; margin: 0 auto; width: 100%; }
     @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
     .table-container { background: radial-gradient(circle, var(--felt) 0%, #022c22 100%); border-radius: 16px; border: 3px solid #047857; box-shadow: inset 0 0 40px rgba(0,0,0,0.6); display: flex; flex-direction: column; justify-content: space-between; padding: 20px; min-height: 580px; position: relative; }
@@ -112,7 +124,9 @@ public final class WebClientAssets {
     </div>
     <div class="lobby-bar">
       <input type="text" id="usernameInput" placeholder="Enter username..." value="Player1">
-      <button id="joinBtn">Join Match</button>
+      <button id="joinBtn">Quick Play</button>
+      <button id="openCreateBtn" class="btn-create">Create Room</button>
+      <button id="openBrowserBtn" class="btn-browse">Browse</button>
       <button id="startBtn" class="btn-start" style="display: none;">Start Match</button>
       <span id="connStatus" style="font-size: 0.85rem; color: #94a3b8;">Disconnected</span>
     </div>
@@ -183,9 +197,67 @@ public final class WebClientAssets {
     </div>
   </div>
 
+  <div class="modal-overlay" id="createRoomModal">
+    <div class="modal" style="text-align: left;">
+      <div class="modal-title" style="text-align: center;">Create New Room</div>
+      <div style="margin-bottom: 12px;">
+        <label style="display:block; font-size: 0.85rem; color: #94a3b8; margin-bottom: 4px;">Room Name</label>
+        <input type="text" id="createRoomName" placeholder="My Room" value="Casual Table" style="width: 100%;">
+      </div>
+      <div style="margin-bottom: 12px;">
+        <label style="display:block; font-size: 0.85rem; color: #94a3b8; margin-bottom: 4px;">Visibility</label>
+        <select id="createRoomVisibility" style="width: 100%;" onchange="toggleAccessCodeField()">
+          <option value="PUBLIC">Public (Listed in Room Browser)</option>
+          <option value="PRIVATE">Private (Requires Access Code)</option>
+        </select>
+      </div>
+      <div id="accessCodeGroup" style="margin-bottom: 12px; display: none;">
+        <label style="display:block; font-size: 0.85rem; color: #94a3b8; margin-bottom: 4px;">Access Code</label>
+        <input type="text" id="createRoomCode" placeholder="e.g. 1234" style="width: 100%;">
+      </div>
+      <div style="margin-bottom: 16px;">
+        <label style="display:block; font-size: 0.85rem; color: #94a3b8; margin-bottom: 4px;">Max Players</label>
+        <select id="createRoomMaxPlayers" style="width: 100%;">
+          <option value="4" selected>4 Players (Classic)</option>
+          <option value="2">2 Players (Duel)</option>
+          <option value="8">8 Players</option>
+          <option value="16">16 Players (Mega Table)</option>
+        </select>
+      </div>
+      <div style="display: flex; gap: 8px;">
+        <button id="confirmCreateRoomBtn" style="flex: 1; background: #16a34a;">Create & Host</button>
+        <button onclick="closeCreateRoomModal()" style="background: #475569;">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="roomBrowserModal">
+    <div class="modal" style="max-width: 600px; text-align: left;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+        <div class="modal-title" style="margin-bottom: 0;">Public Rooms</div>
+        <button id="refreshRoomsBtn" style="background: #0284c7; padding: 4px 10px; font-size: 0.85rem;">↻ Refresh</button>
+      </div>
+      <div style="max-height: 300px; overflow-y: auto;">
+        <table class="room-table">
+          <thead>
+            <tr><th>Room</th><th>Players</th><th>Status</th><th>Action</th></tr>
+          </thead>
+          <tbody id="roomListBody">
+            <tr><td colspan="4" style="text-align: center; color: #94a3b8;">Loading rooms...</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <button onclick="closeRoomBrowserModal()" style="background: #475569; width: 100%; margin-top: 14px;">Close</button>
+    </div>
+  </div>
+
   <script>
     let ws = null;
     let myUsername = '';
+    let currentRoomOwner = '';
+    let lastPlayerNames = [];
+    let lastCurCount = 0;
+    let lastMaxCount = 0;
     let pendingWildCard = null;
     let pendingWildCards = null;
     let selectedIndices = new Set();
@@ -198,6 +270,10 @@ public final class WebClientAssets {
     const opponentCounts = new Map();
 
     const joinBtn = document.getElementById('joinBtn');
+    const openCreateBtn = document.getElementById('openCreateBtn');
+    const openBrowserBtn = document.getElementById('openBrowserBtn');
+    const confirmCreateRoomBtn = document.getElementById('confirmCreateRoomBtn');
+    const refreshRoomsBtn = document.getElementById('refreshRoomsBtn');
     const startBtn = document.getElementById('startBtn');
     const usernameInput = document.getElementById('usernameInput');
     const connStatus = document.getElementById('connStatus');
@@ -215,6 +291,8 @@ public final class WebClientAssets {
     const deckPile = document.getElementById('deckPile');
     const roomInfo = document.getElementById('roomInfo');
     const colorModal = document.getElementById('colorModal');
+    const createRoomModal = document.getElementById('createRoomModal');
+    const roomBrowserModal = document.getElementById('roomBrowserModal');
 
     function connect() {
       const loc = window.location;
@@ -271,6 +349,129 @@ public final class WebClientAssets {
       usernameInput.disabled = true;
     });
 
+    openCreateBtn.addEventListener('click', () => {
+      createRoomModal.style.display = 'flex';
+    });
+
+    function closeCreateRoomModal() {
+      createRoomModal.style.display = 'none';
+    }
+
+    function toggleAccessCodeField() {
+      const vis = document.getElementById('createRoomVisibility').value;
+      const group = document.getElementById('accessCodeGroup');
+      group.style.display = vis === 'PRIVATE' ? 'block' : 'none';
+    }
+
+    confirmCreateRoomBtn.addEventListener('click', () => {
+      const name = usernameInput.value.trim();
+      if (!name) {
+        alert('Please enter a username first!');
+        usernameInput.focus();
+        return;
+      }
+      myUsername = name;
+      const rName = document.getElementById('createRoomName').value.trim() || 'Room';
+      const vis = document.getElementById('createRoomVisibility').value;
+      const code = document.getElementById('createRoomCode').value.trim();
+      const maxP = document.getElementById('createRoomMaxPlayers').value;
+
+      closeCreateRoomModal();
+
+      const proceed = () => {
+        sendCommand(`JOIN ${name} LOBBY`);
+        let cmd = `CREATE_ROOM ${rName} ${vis}`;
+        if (vis === 'PRIVATE' && code) cmd += ` ${code}`;
+        cmd += ` ${maxP}`;
+        sendCommand(cmd);
+      };
+
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        connect();
+        setTimeout(proceed, 400);
+      } else {
+        proceed();
+      }
+      joinBtn.disabled = true;
+      usernameInput.disabled = true;
+    });
+
+    openBrowserBtn.addEventListener('click', () => {
+      roomBrowserModal.style.display = 'flex';
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        connect();
+        setTimeout(() => sendCommand('LIST_ROOMS'), 400);
+      } else {
+        sendCommand('LIST_ROOMS');
+      }
+    });
+
+    function closeRoomBrowserModal() {
+      roomBrowserModal.style.display = 'none';
+    }
+
+    refreshRoomsBtn.addEventListener('click', () => {
+      sendCommand('LIST_ROOMS');
+    });
+
+    function renderRoomList(data) {
+      const tbody = document.getElementById('roomListBody');
+      tbody.innerHTML = '';
+      if (!data || data === '-') {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: #94a3b8; padding: 12px;">No public rooms currently open. Create one!</td></tr>';
+        return;
+      }
+      const tokens = data.split(' ');
+      tokens.forEach(tok => {
+        const segs = tok.split(':');
+        if (segs.length >= 4) {
+          const rId = segs[0];
+          const rName = segs[1].replace(/_/g, ' ');
+          const counts = segs[2];
+          const status = segs[3];
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td><strong>${rName}</strong><br><small style="color: #64748b;">${rId}</small></td>
+            <td>${counts}</td>
+            <td><span class="badge" style="background: ${status === 'WAITING' ? '#16a34a' : '#d97706'}; font-size: 0.7rem;">${status}</span></td>
+            <td><button style="padding: 4px 10px; font-size: 0.8rem;" onclick="joinSpecificRoom('${rId}')">Join</button></td>
+          `;
+          tbody.appendChild(tr);
+        }
+      });
+    }
+
+    function joinSpecificRoom(roomId) {
+      const name = usernameInput.value.trim();
+      if (!name) {
+        alert('Please enter a username first!');
+        usernameInput.focus();
+        return;
+      }
+      myUsername = name;
+      closeRoomBrowserModal();
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        connect();
+        setTimeout(() => sendCommand(`JOIN ${name} ${roomId}`), 400);
+      } else {
+        sendCommand(`JOIN ${name} ${roomId}`);
+      }
+      joinBtn.disabled = true;
+      usernameInput.disabled = true;
+    }
+
+    function kickPlayer(target) {
+      if (confirm(`Kick player '${target}' from the room?`)) {
+        sendCommand(`KICK ${target}`);
+      }
+    }
+
+    function transferOwnership(target) {
+      if (confirm(`Transfer room ownership to '${target}'?`)) {
+        sendCommand(`TRANSFER_OWNERSHIP ${target}`);
+      }
+    }
+
     startBtn.addEventListener('click', () => {
       sendCommand('START');
       startBtn.disabled = true;
@@ -325,6 +526,43 @@ public final class WebClientAssets {
       logContainer.scrollTop = logContainer.scrollHeight;
     }
 
+    function renderLobby(playerNames, curCount, maxCount) {
+      if (gameStarted) return;
+      const isOwner = myUsername && currentRoomOwner === myUsername;
+      turnBanner.className = 'turn-banner';
+      if (playerNames.length >= 2) {
+        turnBanner.textContent = isOwner 
+            ? `★ You are Host! Ready to start (${curCount}/${maxCount} players) ★`
+            : `Lobby: ${curCount}/${maxCount} players. Waiting for host (${currentRoomOwner}) to start...`;
+      } else {
+        turnBanner.textContent = `Lobby: ${curCount}/${maxCount} players. Waiting for more players...`;
+      }
+
+      if (playerNames.length >= 2 && isOwner) {
+        startBtn.style.display = 'inline-block';
+        startBtn.textContent = `Start Match (${curCount}/${maxCount})`;
+        startBtn.disabled = false;
+      } else {
+        startBtn.style.display = 'none';
+      }
+
+      opponentsBar.innerHTML = '';
+      playerNames.forEach(pName => {
+        const isMe = pName === myUsername;
+        const isHost = pName === currentRoomOwner;
+        const div = document.createElement('div');
+        div.className = 'opponent-card';
+        let hostHtml = isHost ? '<span class="host-badge">👑 Host</span>' : '';
+        let actionsHtml = '';
+        if (isOwner && !isMe) {
+          actionsHtml = `<button class="btn-kick" onclick="kickPlayer('${pName}')" title="Kick Player">❌</button>`
+                      + `<button class="btn-promote" onclick="transferOwnership('${pName}')" title="Make Host">👑</button>`;
+        }
+        div.innerHTML = `<span class="opponent-name">${pName}</span>${hostHtml}<span class="opponent-badge">${isMe ? '(You)' : 'Ready'}</span>${actionsHtml}`;
+        opponentsBar.appendChild(div);
+      });
+    }
+
     function handleServerMessage(raw) {
       const parts = raw.split(' ');
       const type = parts[0];
@@ -335,38 +573,35 @@ public final class WebClientAssets {
           usernameInput.style.borderColor = '#334155';
           break;
 
+        case 'ROOM_OWNER_CHANGED': {
+          currentRoomOwner = parts[1];
+          logMessage(`Room Host: ${currentRoomOwner}`, 'info');
+          if (!gameStarted && lastPlayerNames.length > 0) {
+            renderLobby(lastPlayerNames, lastCurCount, lastMaxCount);
+          }
+          break;
+        }
+
+        case 'ROOM_LIST': {
+          renderRoomList(parts.slice(1).join(' '));
+          break;
+        }
+
         case 'ROOM_STATUS': {
           const roomId = parts[1];
-          const curCount = parts[2];
-          const maxCount = parts[3];
+          const curCount = parseInt(parts[2], 10);
+          const maxCount = parseInt(parts[3], 10);
           const rawPlayers = parts[4] || '';
           const playerNames = (rawPlayers && rawPlayers !== '-') ? rawPlayers.split(',') : [];
 
+          lastPlayerNames = playerNames;
+          lastCurCount = curCount;
+          lastMaxCount = maxCount;
+
           roomInfo.textContent = `Room: ${roomId} (${curCount}/${maxCount})`;
-          logMessage(`Matchmaking: ${playerNames.join(', ')} in room`, 'info');
+          logMessage(`Room ${roomId}: ${playerNames.join(', ')} joined`, 'info');
 
-          if (!gameStarted) {
-            turnBanner.className = 'turn-banner';
-            turnBanner.textContent = `Lobby: ${curCount}/${maxCount} players joined. `
-                + (playerNames.length >= 2 ? "Ready to start!" : "Waiting for players...");
-
-            if (playerNames.length >= 2) {
-              startBtn.style.display = 'inline-block';
-              startBtn.textContent = `Start Match (${curCount}/${maxCount})`;
-              startBtn.disabled = false;
-            } else {
-              startBtn.style.display = 'none';
-            }
-
-            opponentsBar.innerHTML = '';
-            playerNames.forEach(pName => {
-              const isMe = pName === myUsername;
-              const div = document.createElement('div');
-              div.className = 'opponent-card';
-              div.innerHTML = `<span class="opponent-name">${pName}</span><span class="opponent-badge">${isMe ? '(You)' : 'Ready'}</span>`;
-              opponentsBar.appendChild(div);
-            });
-          }
+          renderLobby(playerNames, curCount, maxCount);
           break;
         }
 
@@ -444,7 +679,19 @@ public final class WebClientAssets {
         case 'ERROR': {
           const errMsg = parts.slice(1).join(' ');
           logMessage(`Error: ${errMsg}`, 'error');
-          if (errMsg.includes('NAME_TAKEN') || errMsg.includes('INVALID_USERNAME') || !gameStarted) {
+          if (errMsg.includes('kicked')) {
+            alert('You have been kicked from the room by the host.');
+            gameStarted = false;
+            startBtn.style.display = 'none';
+            opponentsBar.innerHTML = '';
+            handCards.innerHTML = '';
+            handCount.textContent = '0';
+            roomInfo.textContent = 'Room: -';
+            turnBanner.className = 'turn-banner';
+            turnBanner.textContent = 'Kicked from room. Join another room or quick play!';
+            joinBtn.disabled = false;
+            usernameInput.disabled = false;
+          } else if (errMsg.includes('NAME_TAKEN') || errMsg.includes('INVALID_USERNAME') || !gameStarted) {
             joinBtn.disabled = false;
             usernameInput.disabled = false;
             usernameInput.style.borderColor = '#ef4444';

@@ -19,5 +19,7 @@ public enum EventType {
     ULTIMO_DECLARED,
     ULTIMO_PENALTY,
     CHALLENGE_RESULT,
-    ROUND_OVER;
+    ROUND_OVER,
+    ROOM_LIST,
+    ROOM_OWNER_CHANGED;
 }

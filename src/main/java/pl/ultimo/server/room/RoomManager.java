@@ -1,11 +1,16 @@
 package pl.ultimo.server.room;
 
+import pl.ultimo.protocol.RoomVisibility;
+import pl.ultimo.protocol.ServerEvent;
 import pl.ultimo.server.config.ServerConfig;
 import pl.ultimo.server.metrics.MetricsRegistry;
 import pl.ultimo.server.net.ClientSession;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Random;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -32,7 +37,7 @@ public class RoomManager {
     }
 
     /**
-     * Finds an open room with capacity or creates a new one, enrolling the player.
+     * Finds an open public room with capacity or creates a new one, enrolling the player.
      * Uses ReentrantLock to prevent Project Loom carrier thread pinning.
      */
     public GameRoom matchmake(ClientSession session, String username) {
@@ -40,16 +45,16 @@ public class RoomManager {
     }
 
     /**
-     * Finds an open room with capacity or creates a new one with the target capacity, enrolling the player.
+     * Finds an open public room with capacity or creates a new one with the target capacity, enrolling the player.
      * Uses ReentrantLock to prevent Project Loom carrier thread pinning.
      */
     public GameRoom matchmake(ClientSession session, String username, int capacity) {
         int targetCapacity = Math.clamp(capacity, GameRoom.MIN_CAPACITY, GameRoom.MAX_CAPACITY);
         matchmakeLock.lock();
         try {
-            // Look for an existing room waiting for players that doesn't already contain this username
+            // Look for an existing public room waiting for players that doesn't already contain this username
             for (GameRoom room : activeRooms.values()) {
-                if (room.getState() == RoomState.WAITING_FOR_PLAYERS && !room.isFull() && !room.hasPlayer(username)) {
+                if (room.getState() == RoomState.WAITING_FOR_PLAYERS && !room.isFull() && !room.isPrivate() && !room.hasPlayer(username)) {
                     boolean added = room.addPlayer(session, username);
                     if (added) {
                         sessionRoomMap.put(session.getSessionId(), room);
@@ -58,9 +63,9 @@ public class RoomManager {
                 }
             }
 
-            // If no available room, spin up a new room
+            // If no available room, spin up a new public room
             String roomId = "room-" + roomCounter.getAndIncrement();
-            GameRoom newRoom = new GameRoom(roomId, targetCapacity);
+            GameRoom newRoom = new GameRoom(roomId, roomId, RoomVisibility.PUBLIC, null, targetCapacity, new Random(), (sess) -> sessionRoomMap.remove(sess.getSessionId()));
             newRoom.addPlayer(session, username);
 
             activeRooms.put(roomId, newRoom);
@@ -75,14 +80,61 @@ public class RoomManager {
         }
     }
 
-    public GameRoom joinRoom(ClientSession session, String username, String roomId) {
-        return joinRoom(session, username, roomId, config.defaultRoomCapacity());
+    /**
+     * Creates a new targeted public or private room.
+     */
+    public GameRoom createRoom(ClientSession session, String username, String roomName, RoomVisibility visibility, String accessCode, int capacity) {
+        int targetCapacity = Math.clamp(capacity, GameRoom.MIN_CAPACITY, GameRoom.MAX_CAPACITY);
+        matchmakeLock.lock();
+        try {
+            String roomId = "room-" + roomCounter.getAndIncrement();
+            String effectiveName = (roomName != null && !roomName.isBlank()) ? roomName.trim() : roomId;
+            GameRoom newRoom = new GameRoom(roomId, effectiveName, visibility, accessCode, targetCapacity, new Random(), (sess) -> sessionRoomMap.remove(sess.getSessionId()));
+            newRoom.addPlayer(session, username, accessCode);
+
+            activeRooms.put(roomId, newRoom);
+            sessionRoomMap.put(session.getSessionId(), newRoom);
+
+            roomExecutor.submit(newRoom);
+            return newRoom;
+        } finally {
+            matchmakeLock.unlock();
+        }
     }
 
     /**
-     * Enrolls player in a targeted room by ID, creating the room if it doesn't already exist.
+     * Returns a list of currently open public rooms for the lobby browser.
+     * Private rooms are strictly excluded.
      */
+    public List<ServerEvent.RoomEntry> listPublicRooms() {
+        List<ServerEvent.RoomEntry> entries = new ArrayList<>();
+        for (GameRoom room : activeRooms.values()) {
+            if (room.getVisibility() == RoomVisibility.PUBLIC && room.getState() != RoomState.FINISHED) {
+                String status = room.getState() == RoomState.WAITING_FOR_PLAYERS ? "WAITING" : "IN_PROGRESS";
+                entries.add(new ServerEvent.RoomEntry(
+                        room.getRoomId(),
+                        room.getRoomName(),
+                        room.getPlayerCount(),
+                        room.getMaxPlayers(),
+                        status
+                ));
+            }
+        }
+        return entries;
+    }
+
+    public GameRoom joinRoom(ClientSession session, String username, String roomId) {
+        return joinRoom(session, username, roomId, config.defaultRoomCapacity(), null);
+    }
+
     public GameRoom joinRoom(ClientSession session, String username, String roomId, int capacity) {
+        return joinRoom(session, username, roomId, capacity, null);
+    }
+
+    /**
+     * Enrolls player in a targeted room by ID, verifying access code for private rooms.
+     */
+    public GameRoom joinRoom(ClientSession session, String username, String roomId, int capacity, String accessCode) {
         if (roomId == null || roomId.isBlank()) {
             return matchmake(session, username, capacity);
         }
@@ -91,23 +143,38 @@ public class RoomManager {
         matchmakeLock.lock();
         try {
             GameRoom room = activeRooms.get(roomId);
+            if (room == null && accessCode == null) {
+                for (GameRoom r : activeRooms.values()) {
+                    if (roomId.equalsIgnoreCase(r.getAccessCode())) {
+                        room = r;
+                        accessCode = roomId;
+                        break;
+                    }
+                }
+            }
             if (room == null) {
-                room = new GameRoom(roomId, targetCapacity);
+                RoomVisibility vis = (accessCode != null && !accessCode.isBlank()) ? RoomVisibility.PRIVATE : RoomVisibility.PUBLIC;
+                room = new GameRoom(roomId, roomId, vis, accessCode, targetCapacity, new Random(), (sess) -> sessionRoomMap.remove(sess.getSessionId()));
                 activeRooms.put(roomId, room);
                 roomExecutor.submit(room);
             }
 
             if (room.isFull()) {
-                session.sendEvent(new pl.ultimo.protocol.ServerEvent.ErrorEvent("Targeted room " + roomId + " is full"));
+                session.sendEvent(new ServerEvent.ErrorEvent("Targeted room " + roomId + " is full"));
+                return room;
+            }
+
+            if (!room.validateAccess(accessCode)) {
+                session.sendEvent(new ServerEvent.ErrorEvent("INVALID_ACCESS_CODE: Room is private and requires valid access code"));
                 return room;
             }
 
             if (room.hasPlayer(username)) {
-                session.sendEvent(new pl.ultimo.protocol.ServerEvent.ErrorEvent("NAME_TAKEN: Player with name '" + username + "' already exists in this room"));
+                session.sendEvent(new ServerEvent.ErrorEvent("NAME_TAKEN: Player with name '" + username + "' already exists in this room"));
                 return room;
             }
 
-            boolean added = room.addPlayer(session, username);
+            boolean added = room.addPlayer(session, username, accessCode);
             if (added) {
                 sessionRoomMap.put(session.getSessionId(), room);
             }

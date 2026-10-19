@@ -11,6 +11,7 @@ import pl.ultimo.core.model.CardValue;
 import pl.ultimo.core.model.Player;
 import pl.ultimo.protocol.ClientCommand;
 import pl.ultimo.protocol.ProtocolCodec;
+import pl.ultimo.protocol.RoomVisibility;
 import pl.ultimo.protocol.ServerEvent;
 import pl.ultimo.server.net.ClientSession;
 import pl.ultimo.server.net.ConnectionListener;
@@ -525,5 +526,147 @@ class GameRoomTest {
         boolean gotDrawResult = activeClient.receivedEvents.stream()
                 .anyMatch(e -> e instanceof ServerEvent.DrawResult);
         assertTrue(gotDrawResult, "Active player should receive DRAW_RESULT in 16-player game");
+    }
+
+    @Test
+    @DisplayName("First player becomes room owner and only owner can start match")
+    void firstPlayerBecomesOwnerAndOnlyOwnerCanStart() throws Exception {
+        GameRoom room = new GameRoom("room-owner", 4);
+        executor.submit(room);
+
+        TestClient alice = createTestClient("s-1", "Alice");
+        TestClient bob = createTestClient("s-2", "Bob");
+
+        room.addPlayer(alice.session, "Alice");
+        assertEquals("Alice", room.getOwnerUsername());
+
+        room.addPlayer(bob.session, "Bob");
+        assertEquals("Alice", room.getOwnerUsername());
+
+        Thread.sleep(150);
+        alice.drainEvents();
+        bob.drainEvents();
+
+        assertEquals("Alice", room.getOwnerUsername());
+
+        // Bob (non-owner) tries to START
+        room.enqueueCommand(bob.session, new ClientCommand.Start());
+        Thread.sleep(150);
+        bob.drainEvents();
+
+        assertEquals(RoomState.WAITING_FOR_PLAYERS, room.getState());
+        boolean bobGotOwnerError = bob.receivedEvents.stream().anyMatch(e -> e instanceof ServerEvent.ErrorEvent err && err.errorMessage().contains("Only room owner"));
+        assertTrue(bobGotOwnerError);
+
+        // Alice (owner) starts match
+        room.enqueueCommand(alice.session, new ClientCommand.Start());
+        Thread.sleep(150);
+        alice.drainEvents();
+        assertEquals(RoomState.IN_PROGRESS, room.getState());
+    }
+
+    @Test
+    @DisplayName("Host can kick player from room and non-owner cannot kick")
+    void hostCanKickPlayerAndNonOwnerCannotKick() throws Exception {
+        GameRoom room = new GameRoom("room-kick", 4);
+        executor.submit(room);
+
+        TestClient alice = createTestClient("s-1", "Alice");
+        TestClient bob = createTestClient("s-2", "Bob");
+        TestClient charlie = createTestClient("s-3", "Charlie");
+
+        room.addPlayer(alice.session, "Alice");
+        room.addPlayer(bob.session, "Bob");
+        room.addPlayer(charlie.session, "Charlie");
+
+        Thread.sleep(100);
+        bob.drainEvents();
+
+        // Bob tries to kick Charlie (not owner)
+        room.enqueueCommand(bob.session, new ClientCommand.Kick("Charlie"));
+        Thread.sleep(150);
+        bob.drainEvents();
+        charlie.drainEvents();
+
+        assertTrue(bob.receivedEvents.stream().anyMatch(e -> e instanceof ServerEvent.ErrorEvent err && err.errorMessage().contains("Only room owner")));
+        assertEquals(3, room.getPlayerCount());
+
+        // Alice (owner) kicks Charlie
+        room.enqueueCommand(alice.session, new ClientCommand.Kick("Charlie"));
+        Thread.sleep(200);
+        charlie.drainEvents();
+        alice.drainEvents();
+
+        assertEquals(2, room.getPlayerCount());
+        assertFalse(room.hasPlayer("Charlie"));
+        assertTrue(charlie.receivedEvents.stream().anyMatch(e -> e instanceof ServerEvent.ErrorEvent err && err.errorMessage().contains("kicked")));
+        assertTrue(alice.receivedEvents.stream().anyMatch(e -> e instanceof ServerEvent.ChatBroadcast cb && cb.message().contains("kicked")));
+    }
+
+    @Test
+    @DisplayName("Host can transfer ownership to another player")
+    void hostCanTransferOwnership() throws Exception {
+        GameRoom room = new GameRoom("room-transfer", 4);
+        executor.submit(room);
+
+        TestClient alice = createTestClient("s-1", "Alice");
+        TestClient bob = createTestClient("s-2", "Bob");
+
+        room.addPlayer(alice.session, "Alice");
+        room.addPlayer(bob.session, "Bob");
+        assertEquals("Alice", room.getOwnerUsername());
+
+        room.enqueueCommand(alice.session, new ClientCommand.TransferOwnership("Bob"));
+        Thread.sleep(150);
+        alice.drainEvents();
+        bob.drainEvents();
+
+        assertEquals("Bob", room.getOwnerUsername());
+        assertTrue(bob.receivedEvents.stream().anyMatch(e -> e instanceof ServerEvent.RoomOwnerChanged roc && roc.newOwner().equals("Bob")));
+    }
+
+    @Test
+    @DisplayName("Host disconnect automatically transfers ownership to next player")
+    void hostDisconnectTransfersOwnership() throws Exception {
+        GameRoom room = new GameRoom("room-succession", 4);
+        executor.submit(room);
+
+        TestClient alice = createTestClient("s-1", "Alice");
+        TestClient bob = createTestClient("s-2", "Bob");
+
+        room.addPlayer(alice.session, "Alice");
+        room.addPlayer(bob.session, "Bob");
+        assertEquals("Alice", room.getOwnerUsername());
+
+        // Alice disconnects
+        room.handleDisconnect(alice.session);
+        Thread.sleep(150);
+        bob.drainEvents();
+
+        assertEquals(1, room.getPlayerCount());
+        assertEquals("Bob", room.getOwnerUsername());
+        assertTrue(bob.receivedEvents.stream().anyMatch(e -> e instanceof ServerEvent.RoomOwnerChanged roc && roc.newOwner().equals("Bob")));
+    }
+
+    @Test
+    @DisplayName("Private room rejects join with invalid access code")
+    void privateRoomValidatesAccessCode() throws Exception {
+        GameRoom privateRoom = new GameRoom("room-priv", "VIP Club", RoomVisibility.PRIVATE, "secret123", 4);
+        executor.submit(privateRoom);
+
+        TestClient alice = createTestClient("s-1", "Alice");
+        TestClient bob = createTestClient("s-2", "Bob");
+
+        // Alice provides invalid access code
+        boolean addedInvalid = privateRoom.addPlayer(alice.session, "Alice", "wrongCode");
+        assertFalse(addedInvalid);
+        alice.drainEvents();
+        assertTrue(alice.receivedEvents.stream().anyMatch(e -> e instanceof ServerEvent.ErrorEvent err && err.errorMessage().contains("INVALID_ACCESS_CODE")));
+
+        // Alice provides valid access code
+        boolean addedValid = privateRoom.addPlayer(alice.session, "Alice", "secret123");
+        assertTrue(addedValid);
+        assertEquals(1, privateRoom.getPlayerCount());
+        assertEquals("Alice", privateRoom.getOwnerUsername());
     }
 }

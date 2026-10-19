@@ -124,6 +124,7 @@ class WebSocketIntegrationTest {
         List<String> aliceMsgs = Collections.synchronizedList(new ArrayList<>());
         List<String> bobMsgs = Collections.synchronizedList(new ArrayList<>());
 
+        CountDownLatch aliceJoinLatch = new CountDownLatch(1);
         CountDownLatch startLatch = new CountDownLatch(2);
 
         WebSocket wsAlice = client.newWebSocketBuilder()
@@ -132,6 +133,9 @@ class WebSocketIntegrationTest {
                     public CompletionStage<?> onText(WebSocket ws, CharSequence data, boolean last) {
                         String msg = data.toString();
                         aliceMsgs.add(msg);
+                        if (msg.startsWith("ROOM_STATUS")) {
+                            aliceJoinLatch.countDown();
+                        }
                         if (msg.startsWith("HAND_UPDATE")) {
                             startLatch.countDown();
                         }
@@ -155,6 +159,7 @@ class WebSocketIntegrationTest {
                 .get(5, TimeUnit.SECONDS);
 
         wsAlice.sendText("JOIN Alice\n", true);
+        assertTrue(aliceJoinLatch.await(5, TimeUnit.SECONDS), "Alice should join first to become room owner");
         wsBob.sendText("JOIN Bob\n", true);
 
         Thread.sleep(200);
@@ -182,8 +187,9 @@ class WebSocketIntegrationTest {
         List<String> aliceMsgs = Collections.synchronizedList(new ArrayList<>());
         List<String> bobMsgs = Collections.synchronizedList(new ArrayList<>());
 
+        CountDownLatch aliceJoinLatch = new CountDownLatch(1);
         CountDownLatch startLatch = new CountDownLatch(2);
-        CountDownLatch comboChatLatch = new CountDownLatch(2);
+        CountDownLatch comboChatLatch = new CountDownLatch(1);
 
         WebSocket wsAlice = client.newWebSocketBuilder()
                 .buildAsync(URI.create("ws://localhost:" + port + "/ws"), new WebSocket.Listener() {
@@ -191,6 +197,9 @@ class WebSocketIntegrationTest {
                     public CompletionStage<?> onText(WebSocket ws, CharSequence data, boolean last) {
                         String msg = data.toString();
                         aliceMsgs.add(msg);
+                        if (msg.startsWith("ROOM_STATUS")) {
+                            aliceJoinLatch.countDown();
+                        }
                         if (msg.startsWith("HAND_UPDATE")) {
                             startLatch.countDown();
                         }
@@ -220,6 +229,7 @@ class WebSocketIntegrationTest {
                 .get(5, TimeUnit.SECONDS);
 
         wsAlice.sendText("JOIN Alice\n", true);
+        assertTrue(aliceJoinLatch.await(5, TimeUnit.SECONDS), "Alice should join first to become room owner");
         wsBob.sendText("JOIN Bob\n", true);
 
         Thread.sleep(150);

@@ -123,4 +123,24 @@ public sealed interface ServerEvent {
             return EventType.ROUND_OVER;
         }
     }
+
+    record RoomOwnerChanged(String newOwner) implements ServerEvent {
+        @Override
+        public EventType type() {
+            return EventType.ROOM_OWNER_CHANGED;
+        }
+    }
+
+    public record RoomEntry(String roomId, String name, int currentPlayers, int maxPlayers, String status) {}
+
+    record RoomList(List<RoomEntry> rooms) implements ServerEvent {
+        public RoomList {
+            rooms = rooms != null ? List.copyOf(rooms) : List.of();
+        }
+
+        @Override
+        public EventType type() {
+            return EventType.ROOM_LIST;
+        }
+    }
 }

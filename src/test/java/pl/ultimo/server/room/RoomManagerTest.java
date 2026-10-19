@@ -5,6 +5,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import pl.ultimo.protocol.ClientCommand;
+import pl.ultimo.protocol.RoomVisibility;
+import pl.ultimo.protocol.ServerEvent;
 import pl.ultimo.server.config.ServerConfig;
 import pl.ultimo.server.net.ClientSession;
 import pl.ultimo.server.net.ConnectionListener;
@@ -184,5 +186,53 @@ class RoomManagerTest {
         assertEquals(16, room.getMaxPlayers());
         assertEquals("big-table", room.getRoomId());
         assertEquals(1, room.getPlayerCount());
+    }
+
+    @Test
+    @DisplayName("createRoom supports Public and Private rooms, and listPublicRooms excludes private rooms")
+    void createRoomAndListPublicRooms() throws Exception {
+        ClientSession alice = createDummySession("s-1", "Alice");
+        ClientSession bob = createDummySession("s-2", "Bob");
+
+        // Alice creates a public room
+        GameRoom pubRoom = roomManager.createRoom(alice, "Alice", "Pub Table", RoomVisibility.PUBLIC, null, 4);
+        assertEquals("Pub Table", pubRoom.getRoomName());
+        assertEquals(RoomVisibility.PUBLIC, pubRoom.getVisibility());
+        assertFalse(pubRoom.isPrivate());
+
+        // Bob creates a private room with code
+        GameRoom privRoom = roomManager.createRoom(bob, "Bob", "VIP Table", RoomVisibility.PRIVATE, "secret", 6);
+        assertEquals("VIP Table", privRoom.getRoomName());
+        assertEquals(RoomVisibility.PRIVATE, privRoom.getVisibility());
+        assertTrue(privRoom.isPrivate());
+
+        // listPublicRooms must contain Alice's public room and MUST NOT contain Bob's private room
+        List<ServerEvent.RoomEntry> publicRooms = roomManager.listPublicRooms();
+        assertEquals(1, publicRooms.size());
+        assertEquals(pubRoom.getRoomId(), publicRooms.get(0).roomId());
+        assertEquals("Pub Table", publicRooms.get(0).name());
+    }
+
+    @Test
+    @DisplayName("Private room join requires correct access code and matchmaking never matches into private rooms")
+    void privateRoomAccessAndMatchmakingExclusion() throws Exception {
+        ClientSession host = createDummySession("s-host", "Host");
+        GameRoom privRoom = roomManager.createRoom(host, "Host", "Priv Room", RoomVisibility.PRIVATE, "pass123", 4);
+
+        // Charlie tries to matchmake - should NOT enter private room
+        ClientSession charlie = createDummySession("s-charlie", "Charlie");
+        GameRoom mmRoom = roomManager.matchmake(charlie, "Charlie");
+        assertNotSame(privRoom, mmRoom);
+
+        // Dave tries to join private room with wrong access code
+        ClientSession dave = createDummySession("s-dave", "Dave");
+        roomManager.joinRoom(dave, "Dave", privRoom.getRoomId(), 4, "wrongCode");
+        assertTrue(roomManager.getRoomForSession("s-dave").isEmpty(), "Dave should not be enrolled with wrong code");
+        assertEquals(1, privRoom.getPlayerCount());
+
+        // Dave joins private room with correct access code
+        roomManager.joinRoom(dave, "Dave", privRoom.getRoomId(), 4, "pass123");
+        assertTrue(roomManager.getRoomForSession("s-dave").isPresent(), "Dave should be enrolled with correct code");
+        assertEquals(2, privRoom.getPlayerCount());
     }
 }

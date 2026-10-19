@@ -208,6 +208,26 @@ public class ServerApp implements ConnectionListener {
             return;
         }
 
+        if (command instanceof ClientCommand.ListRooms) {
+            java.util.List<ServerEvent.RoomEntry> rooms = roomManager.listPublicRooms();
+            session.sendEvent(new ServerEvent.RoomList(rooms));
+            return;
+        }
+
+        if (command instanceof ClientCommand.CreateRoom create) {
+            if (roomManager.getRoomForSession(session.getSessionId()).isPresent()) {
+                session.sendEvent(new ServerEvent.ErrorEvent("Already in an active game room"));
+                return;
+            }
+            if (session.getUsername() == null) {
+                session.setUsername("Player-" + session.getSessionId().substring(0, 4));
+                session.sendEvent(new ServerEvent.Welcome(session.getSessionId(), "Welcome to Ultimo, " + session.getUsername() + "!"));
+            }
+            int capacity = create.maxPlayers() != null ? create.maxPlayers() : config.defaultRoomCapacity();
+            roomManager.createRoom(session, session.getUsername(), create.name(), create.visibility(), create.accessCode(), capacity);
+            return;
+        }
+
         if (command instanceof ClientCommand.Join join) {
             long startNanos = System.nanoTime();
             try {
@@ -222,11 +242,21 @@ public class ServerApp implements ConnectionListener {
 
                 String targetRoomId = join.roomId();
                 if (targetRoomId != null && !targetRoomId.isBlank()) {
+                    if ("LOBBY".equalsIgnoreCase(targetRoomId) || "NONE".equalsIgnoreCase(targetRoomId)) {
+                        session.setUsername(join.username());
+                        session.sendEvent(new ServerEvent.Welcome(session.getSessionId(), "Welcome to Ultimo, " + join.username() + "!"));
+                        return;
+                    }
+
                     Optional<GameRoom> existingRoomOpt = roomManager.getRoom(targetRoomId);
                     if (existingRoomOpt.isPresent()) {
                         GameRoom targetRoom = existingRoomOpt.get();
                         if (targetRoom.isFull()) {
                             session.sendEvent(new ServerEvent.ErrorEvent("Targeted room " + targetRoomId + " is full"));
+                            return;
+                        }
+                        if (!targetRoom.validateAccess(join.accessCode())) {
+                            session.sendEvent(new ServerEvent.ErrorEvent("INVALID_ACCESS_CODE: Room is private and requires valid access code"));
                             return;
                         }
                         if (targetRoom.hasPlayer(join.username())) {
@@ -241,7 +271,7 @@ public class ServerApp implements ConnectionListener {
 
                 int capacity = join.maxPlayers() != null ? join.maxPlayers() : config.defaultRoomCapacity();
                 if (targetRoomId != null && !targetRoomId.isBlank()) {
-                    roomManager.joinRoom(session, join.username(), targetRoomId, capacity);
+                    roomManager.joinRoom(session, join.username(), targetRoomId, capacity, join.accessCode());
                 } else {
                     roomManager.matchmake(session, join.username(), capacity);
                 }
