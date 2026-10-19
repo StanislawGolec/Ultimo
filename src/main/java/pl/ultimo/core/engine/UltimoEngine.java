@@ -128,6 +128,34 @@ public class UltimoEngine {
         this(players, random, targetScore, false, false);
     }
 
+    public UltimoEngine(List<Player> players, long seed) {
+        this(players, new Random(seed), DEFAULT_TARGET_SCORE, false, false);
+    }
+
+    public UltimoEngine(List<Player> players, long seed, int targetScore) {
+        this(players, new Random(seed), targetScore, false, false);
+    }
+
+    public UltimoEngine(List<Player> players, long seed, boolean actionDefendingEnabled, boolean autoPassEnabled) {
+        this(players, new Random(seed), DEFAULT_TARGET_SCORE, actionDefendingEnabled, autoPassEnabled);
+    }
+
+    public UltimoEngine(List<Player> players, long seed, int targetScore, boolean actionDefendingEnabled, boolean autoPassEnabled) {
+        this(players, new Random(seed), targetScore, actionDefendingEnabled, autoPassEnabled);
+    }
+
+    public static UltimoEngine createDeterministic(List<Player> players, long seed) {
+        return new UltimoEngine(players, seed);
+    }
+
+    public static UltimoEngine createDeterministic(List<Player> players, long seed, int targetScore) {
+        return new UltimoEngine(players, seed, targetScore);
+    }
+
+    public static UltimoEngine createDeterministic(List<Player> players, long seed, int targetScore, boolean actionDefendingEnabled, boolean autoPassEnabled) {
+        return new UltimoEngine(players, seed, targetScore, actionDefendingEnabled, autoPassEnabled);
+    }
+
     public UltimoEngine(List<Player> players, Random random, int targetScore, boolean actionDefendingEnabled, boolean autoPassEnabled) {
         if (players == null || players.size() < 2) {
             throw new IllegalArgumentException("At least 2 players are required to start Ultimo");
@@ -187,18 +215,30 @@ public class UltimoEngine {
         if (isTournamentWon) {
             return false;
         }
+        for (Map.Entry<String, Integer> entry : cumulativeScores.entrySet()) {
+            if (entry.getValue() >= targetScore) {
+                this.isTournamentWon = true;
+                if (this.tournamentWinner == null) {
+                    this.tournamentWinner = players.stream()
+                            .filter(p -> p.getUsername().equals(entry.getKey()))
+                            .findFirst()
+                            .orElse(null);
+                }
+                return false;
+            }
+        }
 
         this.deck = Deck.createDeckForPlayerCount(this.players.size(), random);
         this.discardPile = new DiscardPile();
         this.turnManager.reset();
 
+        this.nextRank = 1;
+        this.finishedPlayers.clear();
+        this.matchStandings.clear();
         for (Player p : players) {
             p.getHand().clear();
             p.setPlacementRank(0);
         }
-        this.nextRank = 1;
-        this.finishedPlayers.clear();
-        this.matchStandings.clear();
 
         for (int i = 0; i < STARTING_HAND_SIZE; i++) {
             for (Player player : players) {
@@ -224,6 +264,7 @@ public class UltimoEngine {
         this.isGameOver = false;
         this.hasDrawnThisTurn = false;
         this.winner = null;
+        this.lastRoundPointsEarned = 0;
         this.pendingWildChallenge = null;
         this.pendingUltimoViolator = null;
         this.ultimoDeclared.clear();
@@ -233,12 +274,6 @@ public class UltimoEngine {
         this.pendingDrawType = null;
         this.drawTarget = null;
         this.lastDrawResult = null;
-        this.nextRank = 1;
-        this.finishedPlayers.clear();
-        this.matchStandings.clear();
-        for (Player p : players) {
-            p.setPlacementRank(0);
-        }
 
         return true;
     }
@@ -342,11 +377,6 @@ public class UltimoEngine {
             finishedPlayers.add(player);
             matchStandings.add(new ServerEvent.Placement(rank, player.getUsername()));
 
-            if (this.winner == null) {
-                this.winner = player;
-                tallyRoundScores(player);
-            }
-
             Card lastCard = orderedCards.get(orderedCards.size() - 1);
             int count = orderedCards.size();
 
@@ -380,6 +410,11 @@ public class UltimoEngine {
                 }
             } else {
                 turnManager.advanceTurn(1);
+            }
+
+            if (this.winner == null) {
+                this.winner = player;
+                tallyRoundScores(player);
             }
 
             // Check if only 1 active player remains
@@ -732,7 +767,10 @@ public class UltimoEngine {
         );
     }
 
-    private void tallyRoundScores(Player roundWinner) {
+    public int tallyRoundScores(Player roundWinner) {
+        if (roundWinner == null) {
+            return 0;
+        }
         int points = 0;
         for (Player p : players) {
             if (!p.equals(roundWinner)) {
@@ -748,6 +786,7 @@ public class UltimoEngine {
             this.isTournamentWon = true;
             this.tournamentWinner = roundWinner;
         }
+        return points;
     }
 
     /**

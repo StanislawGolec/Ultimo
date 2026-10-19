@@ -21,7 +21,7 @@ import java.util.stream.Collectors;
 public final class ProtocolCodec {
 
     public static final Pattern USERNAME_PATTERN = Pattern.compile(
-            "^[a-zA-Z0-9\\u00C0-\\u024F!@#$%^&*()_+\\-=\\[\\]{};':\"\\\\|,.<>/?~`]+(?: [a-zA-Z0-9\\u00C0-\\u024F!@#$%^&*()_+\\-=\\[\\]{};':\"\\\\|,.<>/?~`]+)*$"
+            "^[a-zA-Z0-9_\\-.!@#$%^&*]+$"
     );
 
     public static boolean isValidUsername(String username) {
@@ -59,97 +59,47 @@ public final class ProtocolCodec {
             return switch (commandName) {
                 case "JOIN" -> {
                     if (parts.length < 2) {
-                        throw new ProtocolException("JOIN command requires a username: JOIN <username> [room_id] [max_players]");
+                        throw new ProtocolException("JOIN command requires a username: JOIN <username> [room_id] [access_code] [max_players]");
+                    }
+                    String username = parts[1];
+                    if (!isValidUsername(username)) {
+                        throw new ProtocolException("INVALID_USERNAME: Username must be 2-24 characters using word characters and standard symbols");
                     }
                     if (parts.length == 2) {
-                        String username = parts[1];
-                        if (!isValidUsername(username)) {
-                            throw new ProtocolException("INVALID_USERNAME: Username must be 2-24 characters using word characters and standard symbols");
-                        }
-                        yield new ClientCommand.Join(username, null, null);
+                        yield new ClientCommand.Join(username, null, null, null);
                     }
                     if (parts.length == 3) {
-                        String username = parts[1];
-                        if (!isValidUsername(username)) {
-                            throw new ProtocolException("INVALID_USERNAME: Username must be 2-24 characters using word characters and standard symbols");
-                        }
-                        char c0 = parts[2].charAt(0);
-                        if (c0 >= '0' && c0 <= '9') {
-                            try {
-                                int cap = Integer.parseInt(parts[2]);
-                                if (cap >= 2 && cap <= 16) {
-                                    yield new ClientCommand.Join(username, null, cap, null);
-                                }
-                            } catch (NumberFormatException ignored) {}
-                        }
+                        try {
+                            int cap = Integer.parseInt(parts[2]);
+                            if (cap >= 2 && cap <= 16) {
+                                yield new ClientCommand.Join(username, null, cap, null);
+                            }
+                        } catch (NumberFormatException ignored) {}
                         yield new ClientCommand.Join(username, parts[2], null, null);
                     }
                     if (parts.length == 4) {
-                        String p2Lower = parts[2].toLowerCase();
-                        boolean parts2IsRoom = p2Lower.startsWith("room")
-                                || p2Lower.startsWith("r-")
-                                || parts[2].contains("_")
-                                || parts[2].contains("-");
-                        if (parts2IsRoom) {
-                            String username = parts[1];
-                            if (!isValidUsername(username)) {
-                                throw new ProtocolException("INVALID_USERNAME: Username must be 2-24 characters using word characters and standard symbols");
+                        String roomId = parts[2];
+                        try {
+                            int cap = Integer.parseInt(parts[3]);
+                            if (cap >= 2 && cap <= 16) {
+                                yield new ClientCommand.Join(username, roomId, cap, null);
                             }
-                            String roomId = parts[2];
-                            char c0 = parts[3].charAt(0);
-                            if (c0 >= '0' && c0 <= '9') {
-                                try {
-                                    int cap = Integer.parseInt(parts[3]);
-                                    if (cap >= 2 && cap <= 16) {
-                                        yield new ClientCommand.Join(username, roomId, cap, null);
-                                    }
-                                } catch (NumberFormatException ignored) {}
-                            }
-                            yield new ClientCommand.Join(username, roomId, null, parts[3]);
-                        }
+                        } catch (NumberFormatException ignored) {}
+                        yield new ClientCommand.Join(username, roomId, null, parts[3]);
                     }
                     if (parts.length == 5) {
-                        String p2Lower = parts[2].toLowerCase();
-                        boolean parts2IsRoom = p2Lower.startsWith("room")
-                                || p2Lower.startsWith("r-")
-                                || parts[2].contains("_")
-                                || parts[2].contains("-");
-                        if (parts2IsRoom) {
-                            String username = parts[1];
-                            if (!isValidUsername(username)) {
-                                throw new ProtocolException("INVALID_USERNAME: Username must be 2-24 characters using word characters and standard symbols");
+                        String roomId = parts[2];
+                        String accessCode = parts[3];
+                        Integer cap = null;
+                        try {
+                            int c = Integer.parseInt(parts[4]);
+                            if (c >= 2 && c <= 16) {
+                                cap = c;
                             }
-                            String roomId = parts[2];
-                            String accessCode = parts[3];
-                            Integer cap = null;
-                            char c0 = parts[4].charAt(0);
-                            if (c0 >= '0' && c0 <= '9') {
-                                try {
-                                    int c = Integer.parseInt(parts[4]);
-                                    if (c >= 2 && c <= 16) {
-                                        cap = c;
-                                    }
-                                } catch (NumberFormatException ignored) {}
-                            }
-                            yield new ClientCommand.Join(username, roomId, cap, accessCode);
-                        }
+                        } catch (NumberFormatException ignored) {}
+                        yield new ClientCommand.Join(username, roomId, cap, accessCode);
                     }
-                    String lastToken = parts[parts.length - 1];
-                    if (lastToken.toLowerCase().startsWith("room") || lastToken.toLowerCase().startsWith("r-")
-                            || lastToken.contains("_") || lastToken.contains("-")) {
-                        int end = line.lastIndexOf(lastToken);
-                        String username = line.substring(line.indexOf(' ') + 1, end).trim();
-                        if (!isValidUsername(username)) {
-                            throw new ProtocolException("INVALID_USERNAME: Username must be 2-24 characters using word characters and standard symbols");
-                        }
-                        yield new ClientCommand.Join(username, lastToken, null, null);
-                    } else {
-                        String username = line.substring(line.indexOf(' ') + 1).trim();
-                        if (!isValidUsername(username)) {
-                            throw new ProtocolException("INVALID_USERNAME: Username must be 2-24 characters using word characters and standard symbols");
-                        }
-                        yield new ClientCommand.Join(username, null, null, null);
-                    }
+                    throw new ProtocolException("Too many arguments for JOIN command: " + line);
                 }
                 case "PLAY" -> {
                     if (parts.length < 2) {
@@ -275,6 +225,19 @@ public final class ProtocolCodec {
                     }
                     yield new ClientCommand.TransferOwnership(parts[1]);
                 }
+                case "QUIT" -> new ClientCommand.Quit();
+                case "RECONNECT" -> {
+                    if (parts.length < 4) {
+                        throw new ProtocolException("RECONNECT requires username, roomId, and token: RECONNECT <username> <roomId> <token>");
+                    }
+                    String username = parts[1];
+                    if (!isValidUsername(username)) {
+                        throw new ProtocolException("INVALID_USERNAME: Username must be 2-24 characters using word characters and standard symbols");
+                    }
+                    String roomId = parts[2];
+                    String token = parts[3];
+                    yield new ClientCommand.Reconnect(username, roomId, token);
+                }
                 default -> throw new ProtocolException("Unknown command: " + commandName);
             };
         } catch (ProtocolException pe) {
@@ -336,6 +299,8 @@ public final class ProtocolCodec {
             case ClientCommand.ListRooms lr -> "LIST_ROOMS\n";
             case ClientCommand.Kick kick -> "KICK " + kick.targetPlayer() + "\n";
             case ClientCommand.TransferOwnership to -> "TRANSFER_OWNERSHIP " + to.targetPlayer() + "\n";
+            case ClientCommand.Quit quit -> "QUIT\n";
+            case ClientCommand.Reconnect rec -> "RECONNECT " + rec.username() + " " + rec.roomId() + " " + rec.token() + "\n";
         };
     }
 
@@ -345,8 +310,10 @@ public final class ProtocolCodec {
     public static String encodeEvent(ServerEvent event) {
         Objects.requireNonNull(event, "event must not be null");
         return switch (event) {
-            case ServerEvent.Welcome welcome ->
-                    "WELCOME " + welcome.assignedPlayerId() + " " + welcome.message() + "\n";
+            case ServerEvent.Welcome welcome -> {
+                String token = welcome.reconnectToken() != null ? welcome.reconnectToken() : welcome.assignedPlayerId();
+                yield "WELCOME " + welcome.assignedPlayerId() + " " + token + " " + welcome.message() + "\n";
+            }
             case ServerEvent.RoomStatus roomStatus -> {
                 String playerList = roomStatus.playerNames().isEmpty() ? "-" : String.join(",", roomStatus.playerNames());
                 yield "ROOM_STATUS " + roomStatus.roomId() + " " + roomStatus.currentPlayers() + " "
@@ -417,6 +384,16 @@ public final class ProtocolCodec {
                         .collect(Collectors.joining(" "));
                 yield "MATCH_STANDINGS " + listStr + "\n";
             }
+            case ServerEvent.ActionDefenseState ads -> {
+                String defType = ads.defenseType() != null ? ads.defenseType().name() : "NONE";
+                yield "DEFENSE_STATE " + defType + " " + ads.accumulatedPenalty() + " " + ads.targetPlayer() + "\n";
+            }
+            case ServerEvent.PlayerState ps -> {
+                if (ps.graceSecondsRemaining() > 0) {
+                    yield "PLAYER_STATE " + ps.username() + " " + ps.status() + " " + ps.graceSecondsRemaining() + "\n";
+                }
+                yield "PLAYER_STATE " + ps.username() + " " + ps.status() + "\n";
+            }
         };
     }
 
@@ -439,8 +416,17 @@ public final class ProtocolCodec {
                         throw new ProtocolException("Malformed WELCOME event: " + line);
                     }
                     String id = parts[1];
-                    String message = parts.length > 2 ? line.substring(line.indexOf(parts[2])).trim() : "";
-                    yield new ServerEvent.Welcome(id, message);
+                    String token = parts.length > 2 ? parts[2] : id;
+                    String message = "";
+                    if (parts.length > 3) {
+                        int tokenPos = line.indexOf(parts[2]);
+                        if (tokenPos != -1) {
+                            message = line.substring(tokenPos + parts[2].length()).trim();
+                        }
+                    } else if (parts.length == 3) {
+                        message = parts[2];
+                    }
+                    yield new ServerEvent.Welcome(id, token, message);
                 }
                 case "ROOM_STATUS" -> {
                     if (parts.length < 4) {
@@ -608,6 +594,24 @@ public final class ProtocolCodec {
                         }
                     }
                     yield new ServerEvent.MatchStandings(placements);
+                }
+                case "DEFENSE_STATE" -> {
+                    if (parts.length < 4) {
+                        throw new ProtocolException("Malformed DEFENSE_STATE event: " + line);
+                    }
+                    CardValue defType = "NONE".equalsIgnoreCase(parts[1]) ? null : CardValue.valueOf(parts[1].toUpperCase());
+                    int penaltyCount = Integer.parseInt(parts[2]);
+                    String targetPlayer = parts[3];
+                    yield new ServerEvent.ActionDefenseState(defType, penaltyCount, targetPlayer);
+                }
+                case "PLAYER_STATE" -> {
+                    if (parts.length < 3) {
+                        throw new ProtocolException("Malformed PLAYER_STATE event: " + line);
+                    }
+                    String username = parts[1];
+                    String status = parts[2].toUpperCase();
+                    int grace = parts.length > 3 ? Integer.parseInt(parts[3]) : 0;
+                    yield new ServerEvent.PlayerState(username, status, grace);
                 }
                 default -> throw new ProtocolException("Unknown server event: " + eventName);
             };
