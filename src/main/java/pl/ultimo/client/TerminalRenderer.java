@@ -138,10 +138,27 @@ public class TerminalRenderer {
             String activePlayer,
             String myUsername,
             Map<String, Integer> opponentCardCounts) {
+        return renderTable(topCard, activeColor, activePlayer, myUsername, opponentCardCounts, null);
+    }
+
+    public String renderTable(
+            Card topCard,
+            CardColor activeColor,
+            String activePlayer,
+            String myUsername,
+            Map<String, Integer> opponentCardCounts,
+            String hudAlert) {
 
         StringBuilder sb = new StringBuilder();
         sb.append("============================================================\n");
         sb.append("  STÓŁ ULTIMO\n");
+        if (hudAlert != null && !hudAlert.isBlank()) {
+            if (ansiEnabled) {
+                sb.append("  ").append(BG_YELLOW).append(BOLD).append(" ").append(hudAlert).append(" ").append(RESET).append("\n");
+            } else {
+                sb.append("  ").append(hudAlert).append("\n");
+            }
+        }
         sb.append("------------------------------------------------------------\n");
 
         sb.append("  Karta na wierzchu: ").append(renderCard(topCard)).append("\n");
@@ -151,7 +168,15 @@ public class TerminalRenderer {
             sb.append("  Przeciwnicy:       ");
             opponentCardCounts.forEach((name, count) -> {
                 if (!name.equalsIgnoreCase(myUsername)) {
-                    sb.append(name).append(" (").append(count).append(" kart)  ");
+                    if (count == 1) {
+                        if (ansiEnabled) {
+                            sb.append(name).append(" (").append(FG_RED).append(BOLD).append("1 KARTA! [catch ").append(name).append("]").append(RESET).append(")  ");
+                        } else {
+                            sb.append(name).append(" (1 KARTA! [catch ").append(name).append("])  ");
+                        }
+                    } else {
+                        sb.append(name).append(" (").append(count).append(" kart)  ");
+                    }
                 }
             });
             sb.append("\n");
@@ -170,6 +195,29 @@ public class TerminalRenderer {
         }
         sb.append("============================================================\n");
 
+        return sb.toString();
+    }
+
+    /**
+     * Formats tournament/match podium leaderboard standings.
+     */
+    public String renderPodium(String winner, Map<String, Integer> scores) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("============================================================\n");
+        sb.append("                 *** PODIUM & STANDINGS ***                 \n");
+        sb.append("------------------------------------------------------------\n");
+        sb.append("  🥇 1st PLACE (Winner): ").append(winner).append("\n");
+        if (scores != null && !scores.isEmpty()) {
+            int rank = 2;
+            for (Map.Entry<String, Integer> entry : scores.entrySet()) {
+                if (!entry.getKey().equalsIgnoreCase(winner)) {
+                    String medal = (rank == 2) ? "🥈 2nd PLACE: " : (rank == 3) ? "🥉 3rd PLACE: " : "💀 " + rank + "th PLACE: ";
+                    sb.append("  ").append(medal).append(entry.getKey()).append(" (").append(entry.getValue()).append(" pkt)\n");
+                    rank++;
+                }
+            }
+        }
+        sb.append("============================================================\n");
         return sb.toString();
     }
 

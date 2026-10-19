@@ -3,6 +3,7 @@ package pl.ultimo.server.net;
 /**
  * Embedded HTML5/CSS/JavaScript single-page application for the Ultimo web client.
  * Self-contained with zero external CDN dependencies.
+ * Adaptive from mobile portrait (400x800) to 4K Ultrawide displays.
  */
 public final class WebClientAssets {
 
@@ -22,7 +23,7 @@ public final class WebClientAssets {
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Ultimo Multiplayer | Web Edition</title>
   <style>
     :root {
@@ -39,10 +40,13 @@ public final class WebClientAssets {
     }
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
     body { background: var(--bg); color: var(--text); min-height: 100vh; display: flex; flex-direction: column; overflow-x: hidden; }
-    header { background: var(--panel); padding: 12px 24px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; }
-    .brand { font-size: 1.5rem; font-weight: 800; letter-spacing: 1px; color: #f59e0b; display: flex; align-items: center; gap: 8px; }
+    header { background: var(--panel); padding: clamp(8px, 1.2vh, 16px) clamp(12px, 2vw, 32px); display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; flex-wrap: wrap; gap: 10px; }
+    .brand { font-size: clamp(1.2rem, 2vw, 1.8rem); font-weight: 800; letter-spacing: 1px; color: #f59e0b; display: flex; align-items: center; gap: 8px; }
     .badge { font-size: 0.75rem; padding: 3px 8px; border-radius: 9999px; background: #3b82f6; color: white; text-transform: uppercase; font-weight: 700; }
-    .lobby-bar { display: flex; gap: 10px; align-items: center; }
+    .lobby-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .room-chip { background: #1e293b; border: 1px solid #38bdf8; color: #38bdf8; padding: 4px 10px; border-radius: 9999px; font-size: 0.8rem; font-weight: 700; display: flex; align-items: center; gap: 6px; box-shadow: 0 0 10px rgba(56, 189, 248, 0.2); }
+    .btn-copy { background: #0284c7; color: white; border: none; padding: 2px 8px; border-radius: 4px; font-size: 0.72rem; font-weight: 700; cursor: pointer; transition: background 0.15s; }
+    .btn-copy:hover { background: #0369a1; }
     input[type="text"] { background: #0f172a; border: 1px solid #475569; color: white; padding: 8px 12px; border-radius: 6px; outline: none; font-size: 0.95rem; }
     input[type="text"]:focus { border-color: var(--accent); }
     button { background: #2563eb; color: white; border: none; padding: 8px 16px; border-radius: 6px; font-weight: 600; cursor: pointer; transition: background 0.15s, transform 0.1s; }
@@ -61,59 +65,82 @@ public final class WebClientAssets {
     .btn-kick:hover { background: #dc2626; }
     .btn-promote { background: #eab308; color: black; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; margin-left: 4px; cursor: pointer; border: none; font-weight: bold; }
     .btn-promote:hover { background: #ca8a04; }
+    .btn-shout-ultimo { background: linear-gradient(135deg, #f59e0b 0%, #fbbf24 50%, #d97706 100%); color: #0f172a; font-weight: 900; font-size: clamp(0.75rem, 0.9vw, 0.95rem); padding: 6px 14px; border-radius: 9999px; border: 2px solid #fef08a; box-shadow: 0 0 14px rgba(245, 158, 11, 0.8); cursor: pointer; animation: bouncePulse 1s infinite alternate; text-transform: uppercase; letter-spacing: 0.5px; }
+    @keyframes bouncePulse { 0% { transform: scale(1); box-shadow: 0 0 10px rgba(245, 158, 11, 0.6); } 100% { transform: scale(1.06); box-shadow: 0 0 20px rgba(251, 191, 36, 1); } }
+    .btn-catch-ultimo { background: #dc2626; color: white; font-weight: 800; font-size: 0.7rem; padding: 3px 8px; border-radius: 6px; border: 1px solid #f87171; cursor: pointer; margin-left: 4px; animation: flashAlert 0.8s infinite; }
+    @keyframes flashAlert { 0%, 100% { background: #dc2626; box-shadow: 0 0 4px #ef4444; } 50% { background: #991b1b; box-shadow: 0 0 12px #f87171; } }
     .host-badge { background: #eab308; color: #0f172a; font-weight: 800; font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; margin-left: 4px; }
     .room-table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 0.9rem; text-align: left; }
     .room-table th, .room-table td { padding: 8px 12px; border-bottom: 1px solid #334155; }
     .room-table th { background: #0f172a; color: #94a3b8; }
     .modal select, .modal input[type="text"] { background: #0f172a; border: 1px solid #475569; color: white; padding: 8px 12px; border-radius: 6px; outline: none; }
-    main { flex: 1; display: grid; grid-template-columns: 1fr 340px; gap: 16px; padding: 16px; max-width: 1400px; margin: 0 auto; width: 100%; }
+    main { flex: 1; display: grid; grid-template-columns: 1fr 340px; gap: 16px; padding: clamp(8px, 1.5vh, 20px); max-width: clamp(1000px, 92vw, 2560px); margin: 0 auto; width: 100%; }
     @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
-    .table-container { background: radial-gradient(circle, var(--felt) 0%, #022c22 100%); border-radius: 16px; border: 3px solid #047857; box-shadow: inset 0 0 40px rgba(0,0,0,0.6); display: flex; flex-direction: column; justify-content: space-between; padding: 20px; min-height: 580px; position: relative; }
+    .table-container { background: radial-gradient(circle, var(--felt) 0%, #022c22 100%); border-radius: 16px; border: 3px solid #047857; box-shadow: inset 0 0 40px rgba(0,0,0,0.6); display: flex; flex-direction: column; justify-content: space-between; padding: clamp(10px, 1.8vh, 24px); min-height: clamp(340px, 62vh, 850px); position: relative; }
     .opponents-bar { display: flex; justify-content: center; gap: 8px; min-height: 52px; max-height: 130px; overflow-y: auto; flex-wrap: wrap; padding: 4px; align-content: flex-start; }
     .opponent-card { background: rgba(15, 23, 42, 0.85); border: 1px solid #334155; border-radius: 8px; padding: 4px 10px; display: flex; flex-direction: row; align-items: center; gap: 8px; transition: all 0.15s ease; font-size: 0.85rem; }
     .opponent-card.turn { border-color: #facc15; background: rgba(250, 204, 21, 0.15); box-shadow: 0 0 12px rgba(250, 204, 21, 0.5); }
     .opponent-name { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 110px; }
     .opponent-badge { background: #1e293b; border: 1px solid #475569; border-radius: 9999px; padding: 2px 8px; font-size: 0.75rem; font-weight: 700; color: #38bdf8; white-space: nowrap; }
     .opponent-card.turn .opponent-badge { background: #facc15; color: #0f172a; border-color: #facc15; }
-    .center-table { display: flex; align-items: center; justify-content: center; gap: 40px; margin: auto; }
+    .action-hud-banner { padding: 8px 18px; border-radius: 10px; font-weight: 800; font-size: clamp(0.85rem, 1.2vw, 1.05rem); text-align: center; margin: 4px auto; width: fit-content; max-width: 90%; animation: hudPulse 1.2s infinite alternate; z-index: 5; }
+    .action-hud-banner.stack { background: rgba(220, 38, 38, 0.25); border: 2px solid #ef4444; color: #fca5a5; box-shadow: 0 0 20px rgba(239, 68, 68, 0.5); }
+    .action-hud-banner.deflect { background: rgba(14, 165, 233, 0.25); border: 2px solid #38bdf8; color: #7dd3fc; box-shadow: 0 0 20px rgba(56, 189, 248, 0.5); }
+    @keyframes hudPulse { 0% { transform: scale(1); opacity: 0.9; } 100% { transform: scale(1.03); opacity: 1; } }
+    .center-table { display: flex; align-items: center; justify-content: center; gap: clamp(16px, 4vw, 50px); margin: auto; }
     .pile-box { display: flex; flex-direction: column; align-items: center; gap: 8px; }
     .pile-label { font-size: 0.8rem; font-weight: 700; color: #a7f3d0; text-transform: uppercase; letter-spacing: 0.5px; }
-    .deck-pile { width: 90px; height: 130px; border-radius: 10px; background: repeating-linear-gradient(45deg, #1e293b, #1e293b 10px, #0f172a 10px, #0f172a 20px); border: 2px solid #64748b; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 8px 16px rgba(0,0,0,0.4); font-weight: 800; font-size: 1.1rem; color: #94a3b8; transition: transform 0.15s; }
+    .deck-pile { width: clamp(62px, 6.5vw, 100px); height: clamp(90px, 9.8vw, 145px); border-radius: 10px; background: repeating-linear-gradient(45deg, #1e293b, #1e293b 10px, #0f172a 10px, #0f172a 20px); border: 2px solid #64748b; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 8px 16px rgba(0,0,0,0.4); font-weight: 800; font-size: clamp(0.85rem, 1.2vw, 1.1rem); color: #94a3b8; transition: transform 0.15s; }
     .deck-pile:hover { transform: scale(1.05); }
-    .turn-banner { background: rgba(15, 23, 42, 0.9); border: 2px solid #38bdf8; border-radius: 9999px; padding: 8px 24px; font-weight: 700; text-align: center; margin: 10px auto; width: fit-content; }
+    .turn-banner { background: rgba(15, 23, 42, 0.9); border: 2px solid #38bdf8; border-radius: 9999px; padding: 6px 20px; font-weight: 700; text-align: center; margin: 8px auto; width: fit-content; font-size: clamp(0.85rem, 1vw, 1rem); }
     .turn-banner.my-turn { border-color: #22c55e; background: rgba(34, 197, 94, 0.25); animation: pulse 1.5s infinite; }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
-    .hand-area { background: rgba(15, 23, 42, 0.6); border-radius: 12px; padding: 14px; }
-    .hand-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
-    .hand-cards { display: flex; gap: 10px; overflow-x: auto; padding: 10px 4px 16px 4px; justify-content: center; min-height: 155px; }
-    .card { width: 90px; height: 130px; border-radius: 10px; border: 3px solid white; display: flex; flex-direction: column; justify-content: space-between; padding: 6px; box-shadow: 0 6px 12px rgba(0,0,0,0.35); cursor: pointer; transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s; user-select: none; flex-shrink: 0; position: relative; }
-    .card:hover { transform: translateY(-12px); box-shadow: 0 14px 20px rgba(0,0,0,0.5); z-index: 10; }
+    .hand-area { background: rgba(15, 23, 42, 0.6); border-radius: 12px; padding: clamp(8px, 1.2vh, 14px); }
+    .hand-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 8px; }
+    .hand-cards { display: flex; gap: clamp(6px, 1vw, 12px); overflow-x: auto; padding: 8px 4px 14px 4px; justify-content: center; min-height: clamp(105px, 12vw, 170px); }
+    .card { width: clamp(62px, 6.5vw, 100px); height: clamp(90px, 9.8vw, 145px); border-radius: 10px; border: 3px solid white; display: flex; flex-direction: column; justify-content: space-between; padding: 5px; box-shadow: 0 6px 12px rgba(0,0,0,0.35); cursor: pointer; transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s; user-select: none; flex-shrink: 0; position: relative; }
+    .card:hover { transform: translateY(-10px); box-shadow: 0 14px 20px rgba(0,0,0,0.5); z-index: 10; }
     .card.playable { border-color: #fef08a; box-shadow: 0 0 14px rgba(254, 240, 138, 0.8), 0 0 4px white; }
-    .card.selected { transform: translateY(-24px) scale(1.05); border-color: #38bdf8; box-shadow: 0 0 22px rgba(56, 189, 248, 0.95), 0 15px 25px rgba(0,0,0,0.6); z-index: 25; }
+    .card.selected { transform: translateY(-20px) scale(1.05); border-color: #38bdf8; box-shadow: 0 0 22px rgba(56, 189, 248, 0.95), 0 15px 25px rgba(0,0,0,0.6); z-index: 25; }
     .btn-play { background: #22c55e; color: white; padding: 6px 14px; border-radius: 6px; font-weight: 700; cursor: pointer; border: 1px solid #16a34a; transition: all 0.15s; }
     .btn-play:hover { transform: scale(1.05); background: #16a34a; }
-    .card-top { font-size: 0.85rem; font-weight: 900; }
-    .card-center { font-size: 1.5rem; font-weight: 900; align-self: center; margin: auto; background: white; border-radius: 50%; width: 52px; height: 52px; display: flex; align-items: center; justify-content: center; color: black; box-shadow: inset 0 0 4px rgba(0,0,0,0.4); text-align: center; line-height: 1; }
-    .card-bottom { font-size: 0.85rem; font-weight: 900; align-self: flex-end; transform: rotate(180deg); }
+    .card-top { font-size: clamp(0.7rem, 0.85vw, 0.9rem); font-weight: 900; }
+    .card-center { font-size: clamp(1.1rem, 1.5vw, 1.6rem); font-weight: 900; align-self: center; margin: auto; background: white; border-radius: 50%; width: clamp(34px, 4vw, 54px); height: clamp(34px, 4vw, 54px); display: flex; align-items: center; justify-content: center; color: black; box-shadow: inset 0 0 4px rgba(0,0,0,0.4); text-align: center; line-height: 1; }
+    .card-bottom { font-size: clamp(0.7rem, 0.85vw, 0.9rem); font-weight: 900; align-self: flex-end; transform: rotate(180deg); }
     .card-red { background: var(--red); color: white; }
     .card-green { background: var(--green); color: white; }
     .card-blue { background: var(--blue); color: white; }
     .card-yellow { background: var(--yellow); color: black; }
     .card-wild { background: linear-gradient(135deg, var(--red) 25%, var(--blue) 25% 50%, var(--yellow) 50% 75%, var(--green) 75%); color: white; }
     .card-wild .card-center { background: #0f172a; color: white; }
-    .sidebar { background: var(--panel); border-radius: 16px; border: 1px solid #334155; display: flex; flex-direction: column; overflow: hidden; height: 100%; min-height: 580px; }
-    .sidebar-header { padding: 12px 16px; border-bottom: 1px solid #334155; font-weight: 700; display: flex; justify-content: space-between; }
+    .sidebar { background: var(--panel); border-radius: 16px; border: 1px solid #334155; display: flex; flex-direction: column; overflow: hidden; height: 100%; min-height: 480px; }
+    .sidebar-header { padding: 12px 16px; border-bottom: 1px solid #334155; font-weight: 700; display: flex; justify-content: space-between; align-items: center; }
     .log-container { flex: 1; padding: 12px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; font-size: 0.85rem; }
     .log-item { padding: 6px 10px; border-radius: 6px; background: #0f172a; border-left: 3px solid #3b82f6; word-break: break-word; }
     .log-item.chat { border-left-color: #a855f7; }
     .log-item.error { border-left-color: #ef4444; color: #fca5a5; }
     .log-item.win { border-left-color: #eab308; background: #422006; font-weight: bold; }
+    .log-item.autopass { border-left-color: #f59e0b; background: rgba(245, 158, 11, 0.15); color: #fde68a; font-weight: 600; }
     .chat-box { padding: 10px; border-top: 1px solid #334155; display: flex; gap: 8px; }
-    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: none; align-items: center; justify-content: center; z-index: 100; }
-    .modal { background: var(--panel); border: 1px solid #475569; border-radius: 12px; padding: 24px; max-width: 400px; width: 90%; text-align: center; }
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.75); display: none; align-items: center; justify-content: center; z-index: 100; backdrop-filter: blur(4px); }
+    .modal { background: var(--panel); border: 1px solid #475569; border-radius: 12px; padding: 24px; max-width: 440px; width: 90%; text-align: center; box-shadow: 0 20px 40px rgba(0,0,0,0.6); }
     .modal-title { font-size: 1.25rem; font-weight: 800; margin-bottom: 16px; }
     .color-options { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
     .btn-color { height: 50px; font-weight: 800; font-size: 1.1rem; border-radius: 8px; }
+    .toast-container { position: fixed; bottom: 24px; right: 24px; display: flex; flex-direction: column; gap: 10px; z-index: 200; pointer-events: none; }
+    .toast { background: rgba(15, 23, 42, 0.95); border: 1px solid #38bdf8; border-left: 4px solid #38bdf8; color: #f8fafc; padding: 12px 18px; border-radius: 8px; font-size: 0.9rem; font-weight: 600; box-shadow: 0 10px 25px rgba(0,0,0,0.5); display: flex; align-items: center; gap: 10px; animation: toastSlideIn 0.3s ease; pointer-events: auto; }
+    .toast.autopass { border-color: #f59e0b; border-left-color: #f59e0b; }
+    @keyframes toastSlideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+    .podium-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-radius: 8px; background: rgba(15, 23, 42, 0.8); border: 1px solid #334155; font-weight: 700; }
+    .podium-row.rank-1 { border-color: #facc15; background: rgba(250, 204, 21, 0.15); color: #fef08a; }
+    .podium-row.rank-2 { border-color: #94a3b8; background: rgba(148, 163, 184, 0.15); color: #f1f5f9; }
+    .podium-row.rank-3 { border-color: #b45309; background: rgba(180, 83, 9, 0.15); color: #fdba74; }
+    .podium-row.rank-last { border-color: #ef4444; background: rgba(239, 68, 68, 0.15); color: #fca5a5; }
+    @media (max-height: 500px) {
+      .table-container { min-height: 300px; padding: 8px; }
+      .deck-pile, .card { width: 55px; height: 80px; }
+      .opponents-bar { max-height: 70px; }
+    }
   </style>
 </head>
 <body>
@@ -124,10 +151,15 @@ public final class WebClientAssets {
     </div>
     <div class="lobby-bar">
       <input type="text" id="usernameInput" placeholder="Enter username..." value="Player1">
+      <input type="text" id="roomCodeInput" placeholder="Room Code (optional)" style="width: 140px;">
       <button id="joinBtn">Quick Play</button>
       <button id="openCreateBtn" class="btn-create">Create Room</button>
       <button id="openBrowserBtn" class="btn-browse">Browse</button>
       <button id="startBtn" class="btn-start" style="display: none;">Start Match</button>
+      <div id="roomChip" class="room-chip" style="display: none;">
+        <span id="roomChipText">Room: -</span>
+        <button id="copyCodeBtn" class="btn-copy" style="display: none;" onclick="copyActiveRoomCode()" title="Copy Room Code">📋 Copy Code</button>
+      </div>
       <span id="connStatus" style="font-size: 0.85rem; color: #94a3b8;">Disconnected</span>
     </div>
   </header>
@@ -141,7 +173,9 @@ public final class WebClientAssets {
         </div>
       </div>
 
-      <div class="turn-banner" id="turnBanner">Connect and click 'Join Match' to start</div>
+      <div id="actionHudBanner" class="action-hud-banner" style="display: none;"></div>
+
+      <div class="turn-banner" id="turnBanner">Connect and click 'Quick Play' to start</div>
 
       <div class="center-table">
         <div class="pile-box">
@@ -159,7 +193,8 @@ public final class WebClientAssets {
       <div class="hand-area">
         <div class="hand-header">
           <div style="font-weight: 700;">Your Hand (<span id="handCount">0</span>)</div>
-          <div style="display: flex; gap: 8px;">
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <button id="shoutUltimoBtn" class="btn-shout-ultimo" style="display: none;" onclick="shoutUltimo()">🔔 SHOUT ULTIMO!</button>
             <button class="btn-play" id="playBtn" style="display: none;">Play Card</button>
             <button class="btn-draw" id="drawBtn" disabled>Draw Card</button>
             <button class="btn-pass" id="passBtn" disabled>Pass Turn</button>
@@ -172,7 +207,7 @@ public final class WebClientAssets {
     <aside class="sidebar">
       <div class="sidebar-header">
         <span>Game Events & Chat</span>
-        <span id="roomInfo" style="color: var(--muted); font-size: 0.8rem;">Room: -</span>
+        <span id="roomInfo" style="color: var(--muted); font-size: 0.8rem; display: none;"></span>
       </div>
       <div class="log-container" id="logContainer">
         <div class="log-item">Welcome to Ultimo! Choose your username and join the matchmaking queue.</div>
@@ -251,9 +286,31 @@ public final class WebClientAssets {
     </div>
   </div>
 
+  <div class="modal-overlay" id="spectatorModal">
+    <div class="modal" style="max-width: 480px; text-align: center;">
+      <div style="font-size: 3rem; margin-bottom: 8px;">🏆</div>
+      <div class="modal-title" style="color: #facc15; font-size: 1.5rem;" id="spectatorTitle">1st PLACE!</div>
+      <p style="color: #94a3b8; margin-bottom: 16px;">You finished! Spectating remaining players...</p>
+      <button onclick="closeSpectatorModal()" style="background: #2563eb; width: 100%;">Spectate Live Match</button>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="podiumModal">
+    <div class="modal" style="max-width: 520px; text-align: center;">
+      <div style="font-size: 3rem; margin-bottom: 8px;">🥇🥈🥉</div>
+      <div class="modal-title" style="color: #facc15; font-size: 1.6rem;">Match Standings</div>
+      <div id="podiumLeaderboard" style="display: flex; flex-direction: column; gap: 8px; margin: 16px 0;"></div>
+      <button onclick="closePodiumModal()" style="background: #16a34a; width: 100%; font-size: 1rem; padding: 10px;">Return to Lobby</button>
+    </div>
+  </div>
+
+  <div id="toastContainer" class="toast-container"></div>
+
   <script>
     let ws = null;
     let myUsername = '';
+    let currentRoomId = '';
+    let activeAccessCode = '';
     let currentRoomOwner = '';
     let lastPlayerNames = [];
     let lastCurCount = 0;
@@ -265,11 +322,16 @@ public final class WebClientAssets {
     let currentTopCard = null;
     let currentActiveColor = 'RED';
     let gameStarted = false;
+    let isPlayerFinished = false;
     let hasDrawnThisTurn = false;
     let currentHandTokens = [];
     const opponentCounts = new Map();
 
     const joinBtn = document.getElementById('joinBtn');
+    const roomCodeInput = document.getElementById('roomCodeInput');
+    const roomChip = document.getElementById('roomChip');
+    const roomChipText = document.getElementById('roomChipText');
+    const copyCodeBtn = document.getElementById('copyCodeBtn');
     const openCreateBtn = document.getElementById('openCreateBtn');
     const openBrowserBtn = document.getElementById('openBrowserBtn');
     const confirmCreateRoomBtn = document.getElementById('confirmCreateRoomBtn');
@@ -284,15 +346,22 @@ public final class WebClientAssets {
     const handCount = document.getElementById('handCount');
     const opponentsBar = document.getElementById('opponentsBar');
     const turnBanner = document.getElementById('turnBanner');
+    const actionHudBanner = document.getElementById('actionHudBanner');
     const discardCardContainer = document.getElementById('discardCardContainer');
     const playBtn = document.getElementById('playBtn');
     const drawBtn = document.getElementById('drawBtn');
     const passBtn = document.getElementById('passBtn');
+    const shoutUltimoBtn = document.getElementById('shoutUltimoBtn');
     const deckPile = document.getElementById('deckPile');
     const roomInfo = document.getElementById('roomInfo');
     const colorModal = document.getElementById('colorModal');
     const createRoomModal = document.getElementById('createRoomModal');
     const roomBrowserModal = document.getElementById('roomBrowserModal');
+    const spectatorModal = document.getElementById('spectatorModal');
+    const spectatorTitle = document.getElementById('spectatorTitle');
+    const podiumModal = document.getElementById('podiumModal');
+    const podiumLeaderboard = document.getElementById('podiumLeaderboard');
+    const toastContainer = document.getElementById('toastContainer');
 
     function connect() {
       const loc = window.location;
@@ -335,18 +404,69 @@ public final class WebClientAssets {
       }
     }
 
+    function showToast(msg, type = 'info') {
+      const toast = document.createElement('div');
+      toast.className = `toast ${type}`;
+      toast.textContent = msg;
+      toastContainer.appendChild(toast);
+      setTimeout(() => {
+        toast.style.transition = 'opacity 0.4s ease, transform 0.4s ease';
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateY(10px)';
+        setTimeout(() => toast.remove(), 400);
+      }, 4500);
+    }
+
+    function shoutUltimo() {
+      sendCommand('ULTIMO');
+      showToast('🔔 You shouted ULTIMO!', 'info');
+      logMessage('You shouted ULTIMO!', 'info');
+    }
+
+    function catchUltimo(target) {
+      if (!target) return;
+      sendCommand(`CATCH_ULTIMO ${target}`);
+      logMessage(`Attempted to catch ${target} without ULTIMO!`, 'info');
+    }
+
+    function copyActiveRoomCode() {
+      if (!activeAccessCode) return;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(activeAccessCode).then(() => {
+          copyCodeBtn.textContent = '✓ Copied!';
+          setTimeout(() => { copyCodeBtn.textContent = '📋 Copy Code'; }, 2000);
+        }).catch(() => {
+          prompt('Copy room code:', activeAccessCode);
+        });
+      } else {
+        prompt('Copy room code:', activeAccessCode);
+      }
+    }
+
+    function closeSpectatorModal() {
+      spectatorModal.style.display = 'none';
+    }
+
+    function closePodiumModal() {
+      podiumModal.style.display = 'none';
+    }
+
     joinBtn.addEventListener('click', () => {
       const name = usernameInput.value.trim();
+      const code = roomCodeInput ? roomCodeInput.value.trim() : '';
       if (!name) return;
       myUsername = name;
+      if (code) activeAccessCode = code;
+      const cmd = code ? `JOIN ${name} ${code}` : `JOIN ${name}`;
       if (!ws || ws.readyState !== WebSocket.OPEN) {
         connect();
-        setTimeout(() => sendCommand(`JOIN ${name}`), 400);
+        setTimeout(() => sendCommand(cmd), 400);
       } else {
-        sendCommand(`JOIN ${name}`);
+        sendCommand(cmd);
       }
       joinBtn.disabled = true;
       usernameInput.disabled = true;
+      if (roomCodeInput) roomCodeInput.disabled = true;
     });
 
     openCreateBtn.addEventListener('click', () => {
@@ -360,50 +480,49 @@ public final class WebClientAssets {
     function toggleAccessCodeField() {
       const vis = document.getElementById('createRoomVisibility').value;
       const group = document.getElementById('accessCodeGroup');
-      group.style.display = vis === 'PRIVATE' ? 'block' : 'none';
+      group.style.display = (vis === 'PRIVATE') ? 'block' : 'none';
     }
 
     confirmCreateRoomBtn.addEventListener('click', () => {
-      const name = usernameInput.value.trim();
-      if (!name) {
-        alert('Please enter a username first!');
-        usernameInput.focus();
-        return;
-      }
-      myUsername = name;
-      const rName = document.getElementById('createRoomName').value.trim() || 'Room';
+      const name = document.getElementById('createRoomName').value.trim() || 'My Room';
       const vis = document.getElementById('createRoomVisibility').value;
       const code = document.getElementById('createRoomCode').value.trim();
-      const maxP = document.getElementById('createRoomMaxPlayers').value;
+      const max = document.getElementById('createRoomMaxPlayers').value;
+      if (vis === 'PRIVATE' && !code) {
+        alert('Please enter an access code for private room');
+        return;
+      }
+      if (vis === 'PRIVATE') {
+        activeAccessCode = code;
+      } else {
+        activeAccessCode = '';
+      }
+      const myName = usernameInput.value.trim() || 'Player1';
+      myUsername = myName;
 
-      closeCreateRoomModal();
-
-      const proceed = () => {
-        sendCommand(`JOIN ${name} LOBBY`);
-        let cmd = `CREATE_ROOM ${rName} ${vis}`;
-        if (vis === 'PRIVATE' && code) cmd += ` ${code}`;
-        cmd += ` ${maxP}`;
-        sendCommand(cmd);
-      };
+      const createCmd = (vis === 'PRIVATE' && code)
+          ? `CREATE_ROOM ${name} ${vis} ${code} ${max}`
+          : `CREATE_ROOM ${name} ${vis} ${max}`;
 
       if (!ws || ws.readyState !== WebSocket.OPEN) {
         connect();
-        setTimeout(proceed, 400);
+        setTimeout(() => {
+          sendCommand(`JOIN ${myName}`);
+          setTimeout(() => sendCommand(createCmd), 300);
+        }, 400);
       } else {
-        proceed();
+        sendCommand(`JOIN ${myName}`);
+        setTimeout(() => sendCommand(createCmd), 300);
       }
+      closeCreateRoomModal();
       joinBtn.disabled = true;
       usernameInput.disabled = true;
+      if (roomCodeInput) roomCodeInput.disabled = true;
     });
 
     openBrowserBtn.addEventListener('click', () => {
       roomBrowserModal.style.display = 'flex';
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        connect();
-        setTimeout(() => sendCommand('LIST_ROOMS'), 400);
-      } else {
-        sendCommand('LIST_ROOMS');
-      }
+      sendCommand('LIST_ROOMS');
     });
 
     function closeRoomBrowserModal() {
@@ -415,61 +534,60 @@ public final class WebClientAssets {
     });
 
     function renderRoomList(data) {
-      const tbody = document.getElementById('roomListBody');
-      tbody.innerHTML = '';
+      const body = document.getElementById('roomListBody');
+      body.innerHTML = '';
       if (!data || data === '-') {
-        tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: #94a3b8; padding: 12px;">No public rooms currently open. Create one!</td></tr>';
+        body.innerHTML = '<tr><td colspan="4" style="text-align: center; color: #94a3b8;">No public rooms open. Create one!</td></tr>';
         return;
       }
-      const tokens = data.split(' ');
-      tokens.forEach(tok => {
-        const segs = tok.split(':');
-        if (segs.length >= 4) {
-          const rId = segs[0];
-          const rName = segs[1].replace(/_/g, ' ');
-          const counts = segs[2];
-          const status = segs[3];
+
+      const rooms = data.split(' ');
+      rooms.forEach(r => {
+        if (!r.trim()) return;
+        const parts = r.split(':');
+        if (parts.length >= 4) {
+          const roomId = parts[0];
+          const name = parts[1].replace(/_/g, ' ');
+          const cap = parts[2];
+          const status = parts[3];
+
           const tr = document.createElement('tr');
           tr.innerHTML = `
-            <td><strong>${rName}</strong><br><small style="color: #64748b;">${rId}</small></td>
-            <td>${counts}</td>
+            <td><strong>${name}</strong><br><span style="font-size: 0.75rem; color: #94a3b8;">${roomId}</span></td>
+            <td>${cap}</td>
             <td><span class="badge" style="background: ${status === 'WAITING' ? '#16a34a' : '#d97706'}; font-size: 0.7rem;">${status}</span></td>
-            <td><button style="padding: 4px 10px; font-size: 0.8rem;" onclick="joinSpecificRoom('${rId}')">Join</button></td>
+            <td><button style="padding: 4px 10px; font-size: 0.8rem; background: #2563eb;" onclick="joinSpecificRoom('${roomId}')">Join</button></td>
           `;
-          tbody.appendChild(tr);
+          body.appendChild(tr);
         }
       });
     }
 
     function joinSpecificRoom(roomId) {
-      const name = usernameInput.value.trim();
-      if (!name) {
-        alert('Please enter a username first!');
-        usernameInput.focus();
-        return;
-      }
-      myUsername = name;
       closeRoomBrowserModal();
+      const myName = usernameInput.value.trim() || 'Player1';
+      myUsername = myName;
       if (!ws || ws.readyState !== WebSocket.OPEN) {
         connect();
-        setTimeout(() => sendCommand(`JOIN ${name} ${roomId}`), 400);
+        setTimeout(() => sendCommand(`JOIN ${myName} ${roomId}`), 400);
       } else {
-        sendCommand(`JOIN ${name} ${roomId}`);
+        sendCommand(`JOIN ${myName} ${roomId}`);
       }
       joinBtn.disabled = true;
       usernameInput.disabled = true;
+      if (roomCodeInput) roomCodeInput.disabled = true;
     }
 
     function kickPlayer(target) {
-      if (confirm(`Kick player '${target}' from the room?`)) {
-        sendCommand(`KICK ${target}`);
-      }
+      if (!target || !confirm(`Kick player ${target}?`)) return;
+      sendCommand(`KICK ${target}`);
+      logMessage(`Kicked player: ${target}`, 'info');
     }
 
     function transferOwnership(target) {
-      if (confirm(`Transfer room ownership to '${target}'?`)) {
-        sendCommand(`TRANSFER_OWNERSHIP ${target}`);
-      }
+      if (!target || !confirm(`Make ${target} the new Host?`)) return;
+      sendCommand(`TRANSFER_OWNERSHIP ${target}`);
+      logMessage(`Transferred host to: ${target}`, 'info');
     }
 
     startBtn.addEventListener('click', () => {
@@ -477,46 +595,33 @@ public final class WebClientAssets {
       startBtn.disabled = true;
     });
 
-    playBtn.addEventListener('click', () => {
-      if (!playBtn.disabled) playSelectedCards();
-    });
-
     drawBtn.addEventListener('click', () => {
-      if (!drawBtn.disabled) {
-        selectedIndices.clear();
-        updatePlayBtnUI();
-        sendCommand('DRAW');
-      }
-    });
-
-    deckPile.addEventListener('click', () => {
-      if (!drawBtn.disabled) {
-        selectedIndices.clear();
-        updatePlayBtnUI();
-        sendCommand('DRAW');
-      }
+      sendCommand('DRAW');
     });
 
     passBtn.addEventListener('click', () => {
-      if (!passBtn.disabled) {
-        hasDrawnThisTurn = false;
-        passBtn.disabled = true;
-        selectedIndices.clear();
-        updatePlayBtnUI();
-        sendCommand('PASS');
-      }
+      sendCommand('PASS');
     });
 
-    sendChatBtn.addEventListener('click', () => {
+    deckPile.addEventListener('click', () => {
+      if (!drawBtn.disabled) sendCommand('DRAW');
+    });
+
+    playBtn.addEventListener('click', () => {
+      playSelectedCards();
+    });
+
+    sendChatBtn.addEventListener('click', sendChat);
+    chatInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') sendChat();
+    });
+
+    function sendChat() {
       const msg = chatInput.value.trim();
       if (!msg) return;
       sendCommand(`CHAT ${msg}`);
       chatInput.value = '';
-    });
-
-    chatInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') sendChatBtn.click();
-    });
+    }
 
     function logMessage(text, type = 'info') {
       const div = document.createElement('div');
@@ -528,22 +633,20 @@ public final class WebClientAssets {
 
     function renderLobby(playerNames, curCount, maxCount) {
       if (gameStarted) return;
-      const isOwner = myUsername && currentRoomOwner === myUsername;
+      const isOwner = (currentRoomOwner === myUsername);
       turnBanner.className = 'turn-banner';
-      if (playerNames.length >= 2) {
-        turnBanner.textContent = isOwner 
-            ? `★ You are Host! Ready to start (${curCount}/${maxCount} players) ★`
-            : `Lobby: ${curCount}/${maxCount} players. Waiting for host (${currentRoomOwner}) to start...`;
-      } else {
-        turnBanner.textContent = `Lobby: ${curCount}/${maxCount} players. Waiting for more players...`;
-      }
-
-      if (playerNames.length >= 2 && isOwner) {
-        startBtn.style.display = 'inline-block';
-        startBtn.textContent = `Start Match (${curCount}/${maxCount})`;
-        startBtn.disabled = false;
-      } else {
+      if (curCount < 2) {
+        turnBanner.textContent = `Lobby (${curCount}/${maxCount}): Waiting for players...`;
         startBtn.style.display = 'none';
+      } else {
+        if (isOwner) {
+          turnBanner.textContent = `👑 You are Host (${curCount}/${maxCount} players ready)`;
+          startBtn.style.display = 'inline-block';
+          startBtn.disabled = false;
+        } else {
+          turnBanner.textContent = `Waiting for Host (${currentRoomOwner || 'host'}) to start match...`;
+          startBtn.style.display = 'none';
+        }
       }
 
       opponentsBar.innerHTML = '';
@@ -598,7 +701,20 @@ public final class WebClientAssets {
           lastCurCount = curCount;
           lastMaxCount = maxCount;
 
-          roomInfo.textContent = `Room: ${roomId} (${curCount}/${maxCount})`;
+          if (roomId && roomId !== '-' && roomId !== 'null') {
+            currentRoomId = roomId;
+            roomInfo.style.display = 'inline';
+            let label = `Room: ${roomId} (${curCount}/${maxCount})`;
+            if (activeAccessCode) {
+              label = `Room: ${roomId} [CODE: ${activeAccessCode}]`;
+              copyCodeBtn.style.display = 'inline-block';
+            } else {
+              copyCodeBtn.style.display = 'none';
+            }
+            roomInfo.textContent = label;
+            roomChipText.textContent = label;
+            roomChip.style.display = 'flex';
+          }
           logMessage(`Room ${roomId}: ${playerNames.join(', ')} joined`, 'info');
 
           renderLobby(playerNames, curCount, maxCount);
@@ -609,6 +725,17 @@ public final class WebClientAssets {
           const cardTokens = parts.slice(1).filter(t => t.trim().length > 0);
           selectedIndices.clear();
           renderHand(cardTokens);
+
+          if (gameStarted && cardTokens.length === 0 && !isPlayerFinished) {
+            isPlayerFinished = true;
+            spectatorTitle.textContent = '🏆 1st PLACE! You finished!';
+            spectatorModal.style.display = 'flex';
+            drawBtn.disabled = true;
+            passBtn.disabled = true;
+            if (playBtn) playBtn.style.display = 'none';
+            if (shoutUltimoBtn) shoutUltimoBtn.style.display = 'none';
+            logMessage('🏆 You shed your last card! You are now spectating.', 'win');
+          }
           break;
         }
 
@@ -623,6 +750,16 @@ public final class WebClientAssets {
           currentActiveColor = parts[2] || 'RED';
           discardCardContainer.innerHTML = '';
           discardCardContainer.appendChild(createCardElement(currentTopCard, currentActiveColor));
+
+          if (currentTopCard && (currentTopCard.includes('DRAW_TWO') || currentTopCard.includes('DRAW_FOUR'))) {
+            const count = currentTopCard.includes('FOUR') ? 4 : 2;
+            actionHudBanner.className = 'action-hud-banner stack';
+            actionHudBanner.textContent = `⚠️ PENALTY STACK: +${count} CARDS! Play a Draw card to defend or click Draw to take penalty.`;
+            actionHudBanner.style.display = 'block';
+          } else if (!actionHudBanner.className.includes('deflect')) {
+            actionHudBanner.style.display = 'none';
+          }
+
           updateTurnUI();
           break;
         }
@@ -662,6 +799,38 @@ public final class WebClientAssets {
           const sender = parts[1];
           const msg = parts.slice(2).join(' ');
           logMessage(`[${sender}]: ${msg}`, sender === 'GAME' ? 'win' : 'chat');
+
+          if (sender === 'GAME') {
+            if (msg.includes('Room Access Code:')) {
+              activeAccessCode = msg.substring(msg.indexOf('Room Access Code:') + 17).trim();
+              if (currentRoomId && currentRoomId !== '-') {
+                const label = `Room: ${currentRoomId} [CODE: ${activeAccessCode}]`;
+                roomInfo.textContent = label;
+                roomChipText.textContent = label;
+                copyCodeBtn.style.display = 'inline-block';
+              }
+            }
+            if (msg.includes('no playable moves') || msg.includes('auto-passed') || msg.includes('Turn passed')) {
+              showToast(`ℹ️ ${msg}`, 'autopass');
+              logMessage(`ℹ️ ${msg}`, 'autopass');
+            }
+            if (msg.includes('PENALTY STACK:')) {
+              actionHudBanner.className = 'action-hud-banner stack';
+              actionHudBanner.textContent = `⚠️ PENALTY STACK: +4 CARDS! Play a Draw card to defend or click Draw to take penalty.`;
+              actionHudBanner.style.display = 'block';
+            } else if (msg.includes('SKIP DEFLECTED') || msg.includes('SKIP EFFECT:')) {
+              actionHudBanner.className = 'action-hud-banner deflect';
+              const shiftedIdx = msg.indexOf('Shifted to ');
+              const target = shiftedIdx > 0 ? msg.substring(shiftedIdx + 11).replace('!', '').trim() : 'next player';
+              actionHudBanner.textContent = `🛡️ SKIP DEFLECTED! Shifted to ${target}!`;
+              actionHudBanner.style.display = 'block';
+              setTimeout(() => {
+                if (actionHudBanner.className.includes('deflect')) {
+                  actionHudBanner.style.display = 'none';
+                }
+              }, 6000);
+            }
+          }
           break;
         }
 
@@ -672,7 +841,19 @@ public final class WebClientAssets {
           turnBanner.textContent = `★ GAME OVER! Winner: ${winner} ★`;
           drawBtn.disabled = true;
           passBtn.disabled = true;
-          alert(`Game Over! Winner is ${winner}!`);
+          if (shoutUltimoBtn) shoutUltimoBtn.style.display = 'none';
+          if (playBtn) playBtn.style.display = 'none';
+          renderPodiumUI(winner, null);
+          break;
+        }
+
+        case 'ROUND_OVER': {
+          const winner = parts[1];
+          const pts = parts[2];
+          const status = parts[3];
+          const scoresToken = parts[4] || '';
+          logMessage(`Round Over! Winner: ${winner} (+${pts} pts)`, 'win');
+          renderPodiumUI(winner, scoresToken);
           break;
         }
 
@@ -686,14 +867,17 @@ public final class WebClientAssets {
             opponentsBar.innerHTML = '';
             handCards.innerHTML = '';
             handCount.textContent = '0';
-            roomInfo.textContent = 'Room: -';
+            roomInfo.style.display = 'none';
+            roomChip.style.display = 'none';
             turnBanner.className = 'turn-banner';
             turnBanner.textContent = 'Kicked from room. Join another room or quick play!';
             joinBtn.disabled = false;
             usernameInput.disabled = false;
+            if (roomCodeInput) roomCodeInput.disabled = false;
           } else if (errMsg.includes('NAME_TAKEN') || errMsg.includes('INVALID_USERNAME') || !gameStarted) {
             joinBtn.disabled = false;
             usernameInput.disabled = false;
+            if (roomCodeInput) roomCodeInput.disabled = false;
             usernameInput.style.borderColor = '#ef4444';
             usernameInput.focus();
             myUsername = '';
@@ -716,8 +900,49 @@ public final class WebClientAssets {
       }
     }
 
+    function renderPodiumUI(winner, scoresStr) {
+      podiumLeaderboard.innerHTML = '';
+      const winnerRow = document.createElement('div');
+      winnerRow.className = 'podium-row rank-1';
+      winnerRow.innerHTML = `<span>🥇 1st PLACE</span><span>${winner} (Winner)</span>`;
+      podiumLeaderboard.appendChild(winnerRow);
+
+      if (scoresStr && scoresStr !== '-') {
+        const scorePairs = scoresStr.split(',').map(s => {
+          const [name, score] = s.split(':');
+          return { name, score: parseInt(score, 10) || 0 };
+        }).filter(p => p.name && p.name !== winner);
+
+        scorePairs.sort((a, b) => b.score - a.score);
+        scorePairs.forEach((p, idx) => {
+          const row = document.createElement('div');
+          const rank = idx + 2;
+          const isLast = (idx === scorePairs.length - 1);
+          let medal = isLast ? '💀 Last' : (rank === 2 ? '🥈 2nd' : (rank === 3 ? '🥉 3rd' : `${rank}th`));
+          let rankClass = isLast ? 'rank-last' : (rank === 2 ? 'rank-2' : (rank === 3 ? 'rank-3' : ''));
+          row.className = `podium-row ${rankClass}`;
+          row.innerHTML = `<span>${medal}</span><span>${p.name} (${p.score} pts)</span>`;
+          podiumLeaderboard.appendChild(row);
+        });
+      } else {
+        let rank = 2;
+        opponentCounts.forEach((cnt, opp) => {
+          if (opp !== winner) {
+            const row = document.createElement('div');
+            const medal = (rank === 2) ? '🥈 2nd' : (rank === 3 ? '🥉 3rd' : `${rank}th`);
+            const rankClass = (rank === 2) ? 'rank-2' : (rank === 3 ? 'rank-3' : 'rank-last');
+            row.className = `podium-row ${rankClass}`;
+            row.innerHTML = `<span>${medal}</span><span>${opp} (${cnt} cards)</span>`;
+            podiumLeaderboard.appendChild(row);
+            rank++;
+          }
+        });
+      }
+      podiumModal.style.display = 'flex';
+    }
+
     function isPlayableCard(token) {
-      if (!gameStarted || !myUsername || currentTurnPlayer !== myUsername || !token) return false;
+      if (!gameStarted || !myUsername || currentTurnPlayer !== myUsername || !token || isPlayerFinished) return false;
       if (token.startsWith('WILD')) return true;
 
       const sep = token.indexOf('_');
@@ -736,6 +961,24 @@ public final class WebClientAssets {
 
     function updateTurnUI() {
       if (!gameStarted) return;
+
+      if (isPlayerFinished) {
+        turnBanner.className = 'turn-banner';
+        turnBanner.textContent = `Spectating match... Current turn: ${currentTurnPlayer}`;
+        drawBtn.disabled = true;
+        passBtn.disabled = true;
+        if (playBtn) playBtn.style.display = 'none';
+        if (shoutUltimoBtn) shoutUltimoBtn.style.display = 'none';
+        return;
+      }
+
+      if (shoutUltimoBtn) {
+        if (currentHandTokens.length <= 2 && currentHandTokens.length > 0) {
+          shoutUltimoBtn.style.display = 'inline-block';
+        } else {
+          shoutUltimoBtn.style.display = 'none';
+        }
+      }
 
       if (myUsername && currentTurnPlayer === myUsername) {
         turnBanner.className = 'turn-banner my-turn';
@@ -763,7 +1006,11 @@ public final class WebClientAssets {
           const isTurn = name === currentTurnPlayer;
           const div = document.createElement('div');
           div.className = `opponent-card ${isTurn ? 'turn' : ''}`;
-          div.innerHTML = `<span class="opponent-name">${name}</span><span class="opponent-badge">${count} 🂠</span>`;
+          let catchHtml = '';
+          if (count === 1) {
+            catchHtml = `<button class="btn-catch-ultimo" onclick="catchUltimo('${name}')" title="Catch ${name} without saying ULTIMO!">🚨 CATCH ULTIMO!</button>`;
+          }
+          div.innerHTML = `<span class="opponent-name">${name}</span><span class="opponent-badge">${count} 🂠</span>${catchHtml}`;
           opponentsBar.appendChild(div);
         }
       });
@@ -779,7 +1026,7 @@ public final class WebClientAssets {
     }
 
     function isComboPlayable(tokens) {
-      if (!gameStarted || !myUsername || currentTurnPlayer !== myUsername || !tokens || tokens.length === 0) return false;
+      if (!gameStarted || !myUsername || currentTurnPlayer !== myUsername || !tokens || tokens.length === 0 || isPlayerFinished) return false;
       const firstVal = getCardValue(tokens[0]);
       const allSameVal = tokens.every(t => getCardValue(t) === firstVal);
       if (!allSameVal) return false;
@@ -788,7 +1035,7 @@ public final class WebClientAssets {
 
     function updatePlayBtnUI() {
       if (!playBtn) return;
-      if (selectedIndices.size === 0 || currentTurnPlayer !== myUsername) {
+      if (selectedIndices.size === 0 || currentTurnPlayer !== myUsername || isPlayerFinished) {
         playBtn.style.display = 'none';
         return;
       }
@@ -822,6 +1069,14 @@ public final class WebClientAssets {
       handCards.innerHTML = '';
       handCount.textContent = cardTokens.length;
 
+      if (shoutUltimoBtn) {
+        if (gameStarted && !isPlayerFinished && cardTokens.length <= 2 && cardTokens.length > 0) {
+          shoutUltimoBtn.style.display = 'inline-block';
+        } else {
+          shoutUltimoBtn.style.display = 'none';
+        }
+      }
+
       cardTokens.forEach((cardToken, index) => {
         const el = createCardElement(cardToken);
         if (isPlayableCard(cardToken)) {
@@ -838,7 +1093,7 @@ public final class WebClientAssets {
     }
 
     function onCardClicked(index, cardToken) {
-      if (!gameStarted) return;
+      if (!gameStarted || isPlayerFinished) return;
       if (currentTurnPlayer !== myUsername) {
         logMessage('Not your turn! Wait for ' + currentTurnPlayer, 'error');
         return;
@@ -871,7 +1126,7 @@ public final class WebClientAssets {
     }
 
     function onCardDoubleClicked(index, cardToken) {
-      if (!gameStarted || currentTurnPlayer !== myUsername) return;
+      if (!gameStarted || currentTurnPlayer !== myUsername || isPlayerFinished) return;
       if (!selectedIndices.has(index)) {
         selectedIndices.clear();
         selectedIndices.add(index);
@@ -880,7 +1135,7 @@ public final class WebClientAssets {
     }
 
     function playSelectedCards() {
-      if (!gameStarted || currentTurnPlayer !== myUsername) return;
+      if (!gameStarted || currentTurnPlayer !== myUsername || isPlayerFinished) return;
       const selectedTokens = Array.from(selectedIndices).map(i => currentHandTokens[i]);
       if (selectedTokens.length === 0) return;
 

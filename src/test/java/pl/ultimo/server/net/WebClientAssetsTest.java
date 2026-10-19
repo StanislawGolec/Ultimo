@@ -41,4 +41,88 @@ class WebClientAssetsTest {
         assertNotNull(bytes);
         assertEquals(html.getBytes(StandardCharsets.UTF_8).length, bytes.length);
     }
+
+    @Test
+    @DisplayName("Web client must contain Room Access Code UI and copy controls")
+    void webClientContainsRoomAccessCodeUI() {
+        String html = WebClientAssets.INDEX_HTML;
+
+        // Room Code lobby input
+        assertTrue(html.contains("id=\"roomCodeInput\""), "Lobby bar must include Room Code input");
+        assertTrue(html.contains("id=\"roomChip\""), "HTML must include room chip header container");
+        assertTrue(html.contains("id=\"copyCodeBtn\""), "HTML must include copy room code button");
+        assertTrue(html.contains("copyActiveRoomCode()"), "HTML must contain copy room code handler");
+        assertTrue(html.contains("activeAccessCode"), "JavaScript must track active room access code");
+    }
+
+    @Test
+    @DisplayName("Web client must contain interactive SHOUT ULTIMO and CATCH ULTIMO controls")
+    void webClientContainsShoutAndCatchUltimoControls() {
+        String html = WebClientAssets.INDEX_HTML;
+
+        // Golden animated SHOUT ULTIMO button
+        assertTrue(html.contains("id=\"shoutUltimoBtn\""), "HTML must include shoutUltimoBtn");
+        assertTrue(html.contains(".btn-shout-ultimo"), "CSS must style animated golden shout button");
+        assertTrue(html.contains("shoutUltimo()"), "JS must provide shoutUltimo function");
+        assertTrue(html.contains("bouncePulse"), "CSS must define bounce animation for shout button");
+
+        // Red flashing CATCH ULTIMO button for opponents
+        assertTrue(html.contains(".btn-catch-ultimo"), "CSS must style red flashing catch button");
+        assertTrue(html.contains("catchUltimo("), "JS must define catchUltimo handler for 1-card opponents");
+        assertTrue(html.contains("flashAlert"), "CSS must define flash alert keyframes");
+    }
+
+    @Test
+    @DisplayName("Web client must contain Action Defending & Stacking Visual HUD")
+    void webClientContainsActionDefendingAndStackingHUD() {
+        String html = WebClientAssets.INDEX_HTML;
+
+        assertTrue(html.contains("id=\"actionHudBanner\""), "Table container must include actionHudBanner");
+        assertTrue(html.contains(".action-hud-banner"), "CSS must style actionHudBanner");
+        assertTrue(html.contains(".action-hud-banner.stack"), "CSS must style draw penalty stack HUD banner");
+        assertTrue(html.contains(".action-hud-banner.deflect"), "CSS must style skip deflection HUD banner");
+        assertTrue(html.contains("PENALTY STACK:"), "JS must render penalty stack text");
+        assertTrue(html.contains("SKIP DEFLECTED!"), "JS must render skip deflected text");
+    }
+
+    @Test
+    @DisplayName("Web client must contain Auto-Pass toast notification system")
+    void webClientContainsAutoPassNotificationSystem() {
+        String html = WebClientAssets.INDEX_HTML;
+
+        assertTrue(html.contains("id=\"toastContainer\""), "HTML must include toastContainer");
+        assertTrue(html.contains(".toast-container"), "CSS must style toast container");
+        assertTrue(html.contains(".toast.autopass"), "CSS must style auto-pass toast indicator");
+        assertTrue(html.contains("showToast("), "JS must provide showToast helper");
+    }
+
+    @Test
+    @DisplayName("Web client must contain Multi-Tier Podium Standings and Spectator Mode modals")
+    void webClientContainsPodiumAndSpectatorModals() {
+        String html = WebClientAssets.INDEX_HTML;
+
+        // Spectator mode modal
+        assertTrue(html.contains("id=\"spectatorModal\""), "HTML must contain spectator modal");
+        assertTrue(html.contains("id=\"spectatorTitle\""), "HTML must contain spectator title");
+        assertTrue(html.contains("isPlayerFinished"), "JS must track spectator finish state");
+
+        // Podium standings modal
+        assertTrue(html.contains("id=\"podiumModal\""), "HTML must contain podium standings modal");
+        assertTrue(html.contains("id=\"podiumLeaderboard\""), "HTML must contain podium leaderboard");
+        assertTrue(html.contains(".podium-row.rank-1"), "CSS must style 1st place gold row");
+        assertTrue(html.contains(".podium-row.rank-2"), "CSS must style 2nd place silver row");
+        assertTrue(html.contains(".podium-row.rank-3"), "CSS must style 3rd place bronze row");
+        assertTrue(html.contains(".podium-row.rank-last"), "CSS must style last place row");
+    }
+
+    @Test
+    @DisplayName("Web client must use CSS clamp() and safe area insets for 400x800 to 4K Ultrawide adaptation")
+    void webClientUsesResponsiveClampAndSafeArea() {
+        String html = WebClientAssets.INDEX_HTML;
+
+        // CSS clamp() usage
+        assertTrue(html.contains("clamp("), "CSS must use clamp() for fluid responsive scaling");
+        assertTrue(html.contains("viewport-fit=cover"), "Viewport meta must specify viewport-fit=cover for notch devices");
+        assertTrue(html.contains("max-height: 500px"), "CSS must provide media query for mobile landscape orientations");
+    }
 }

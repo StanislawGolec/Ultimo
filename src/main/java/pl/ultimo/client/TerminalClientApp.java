@@ -47,10 +47,18 @@ public class TerminalClientApp {
     private String activePlayerName;
     private boolean gameStarted;
 
+    private String roomCode;
+    private volatile String currentHudAlert;
+
     public TerminalClientApp(String host, int port, String username, boolean ansiEnabled) {
+        this(host, port, username, null, ansiEnabled);
+    }
+
+    public TerminalClientApp(String host, int port, String username, String roomCode, boolean ansiEnabled) {
         this.host = host;
         this.port = port;
         this.username = username;
+        this.roomCode = (roomCode != null && !roomCode.isBlank()) ? roomCode.trim() : null;
         this.renderer = new TerminalRenderer(ansiEnabled);
     }
 
@@ -58,6 +66,7 @@ public class TerminalClientApp {
         String host = "localhost";
         int port = 8080;
         String name = null;
+        String room = null;
         boolean ansi = true;
 
         for (int i = 0; i < args.length; i++) {
@@ -70,6 +79,9 @@ public class TerminalClientApp {
                 }
                 case "-name" -> {
                     if (i + 1 < args.length) name = args[++i];
+                }
+                case "-code", "-room" -> {
+                    if (i + 1 < args.length) room = args[++i];
                 }
                 case "--plain", "-plain", "--no-color" -> ansi = false;
             }
@@ -84,12 +96,13 @@ public class TerminalClientApp {
             }
         }
 
-        TerminalClientApp client = new TerminalClientApp(host, port, name, ansi);
+        TerminalClientApp client = new TerminalClientApp(host, port, name, room, ansi);
         client.start(scanner);
     }
 
     public void start(Scanner scanner) {
-        System.out.println("Łączenie z serwerem Ultimo pod " + host + ":" + port + " jako '" + username + "'...");
+        System.out.println("Łączenie z serwerem Ultimo pod " + host + ":" + port + " jako '" + username + "'"
+                + (roomCode != null ? " [Pokój/Kod: " + roomCode + "]" : "") + "...");
 
         try {
             socket = new Socket(host, port);
@@ -101,7 +114,10 @@ public class TerminalClientApp {
             Thread.ofVirtual().name("client-receiver").start(this::receiveServerEvents);
 
             // Send initial JOIN command
-            sendCommand("JOIN " + username);
+            String joinCmd = (roomCode != null && !roomCode.isBlank())
+                    ? "JOIN " + username + " " + roomCode
+                    : "JOIN " + username;
+            sendCommand(joinCmd);
 
             // Run user input loop on main thread
             runInputLoop(scanner);
@@ -295,6 +311,13 @@ public class TerminalClientApp {
                 this.topCard = top.card();
                 this.activeColor = top.activeColor();
                 this.gameStarted = true;
+                if (topCard != null && topCard.value() == pl.ultimo.core.model.CardValue.DRAW_TWO) {
+                    currentHudAlert = "⚠️ PENALTY STACK: +2 CARDS! Play a Draw card to defend or click Draw to take penalty.";
+                } else if (topCard != null && topCard.value() == pl.ultimo.core.model.CardValue.WILD_DRAW_FOUR) {
+                    currentHudAlert = "⚠️ PENALTY STACK: +4 CARDS! Play a Draw card to defend or click Draw to take penalty.";
+                } else if (topCard != null && topCard.value() != pl.ultimo.core.model.CardValue.SKIP) {
+                    currentHudAlert = null;
+                }
                 printTableView();
             }
             case ServerEvent.HandUpdate handUpdate -> {
@@ -322,13 +345,23 @@ public class TerminalClientApp {
                 System.out.println("\n[-] BŁĄD RUCHU: " + err.errorMessage());
             }
             case ServerEvent.ChatBroadcast chat -> {
-                System.out.println("\n[CZAT] " + chat.sender() + ": " + chat.message());
+                if (chat.message().contains("no playable moves") || chat.message().contains("auto-passed") || chat.message().contains("Turn passed")) {
+                    System.out.println("\n[ℹ️ AUTO-PASS] " + chat.message());
+                } else {
+                    System.out.println("\n[CZAT] " + chat.sender() + ": " + chat.message());
+                }
+                if (chat.message().contains("PENALTY STACK:")) {
+                    currentHudAlert = "⚠️ " + chat.message() + " - Play a Draw card to defend or click Draw to take penalty.";
+                } else if (chat.message().contains("SKIP DEFLECTED") || chat.message().contains("SKIP EFFECT")) {
+                    currentHudAlert = "🛡️ " + chat.message();
+                }
             }
             case ServerEvent.GameOver gameOver -> {
                 System.out.println("\n============================================================");
                 System.out.println("               *** KONIEC MECZU ULTIMO ***                  ");
                 System.out.println("  Zwycięzca: " + gameOver.winnerName());
                 System.out.println("============================================================\n");
+                System.out.print(renderer.renderPodium(gameOver.winnerName(), Collections.emptyMap()));
             }
             case ServerEvent.ServerShutdown shutdown -> {
                 System.out.println("\n[!] OSTRZEŻENIE: Serwer jest wyłączany za " + shutdown.drainSeconds() + " sekund (graceful shutdown)...");
@@ -354,6 +387,7 @@ public class TerminalClientApp {
                     System.out.println("  *** TURNIEJ ZAKOŃCZONY! Mistrzem zostaje " + roundOver.roundWinner() + "! ***");
                 }
                 System.out.println("============================================================\n");
+                System.out.print(renderer.renderPodium(roundOver.roundWinner(), roundOver.tournamentScores()));
             }
             case ServerEvent.RoomOwnerChanged roc -> {
                 System.out.println("\n[LOBBY] Właściciel pokoju (Host): " + roc.newOwner());
@@ -368,6 +402,17 @@ public class TerminalClientApp {
                     }
                 }
             }
+            case ServerEvent.PlayerFinished pf -> {
+                System.out.println("\n🏆 [FINISH] Gracz " + pf.playerName() + " zajął " + pf.rank() + ". miejsce!");
+            }
+            case ServerEvent.MatchStandings ms -> {
+                System.out.println("\n============================================================");
+                System.out.println("                 *** TABELA KOŃCOWA ***                    ");
+                for (ServerEvent.Placement p : ms.placements()) {
+                    System.out.println("  Miejsce " + p.rank() + ": " + p.playerName());
+                }
+                System.out.println("============================================================\n");
+            }
             case ServerEvent.Pong ignored -> {}
         }
     }
@@ -377,10 +422,13 @@ public class TerminalClientApp {
             return;
         }
 
-        System.out.print("\n" + renderer.renderTable(topCard, activeColor, activePlayerName, username, opponentCardCounts));
+        System.out.print("\n" + renderer.renderTable(topCard, activeColor, activePlayerName, username, opponentCardCounts, currentHudAlert));
         System.out.println("Twoje karty:");
         synchronized (myHand) {
             System.out.println(renderer.renderHand(myHand));
+            if (myHand.size() <= 2 && !myHand.isEmpty()) {
+                System.out.println(">>> 🔔 ULTIMO ALERT: Pozostało Ci <= 2 karty! Wpisz 'u' lub 'ultimo' aby zgłosić ULTIMO! <<<");
+            }
         }
         System.out.print("Wybór [1-" + myHand.size() + " / kombo np. 1,2 / d / pass / help]> ");
     }
@@ -398,10 +446,10 @@ public class TerminalClientApp {
         System.out.println("\n--- DOSTĘPNE POLECENIA ---");
         System.out.println("  [1, 2... / 1,2 / 1 2] - Zagranie karty lub komba kart o tej samej wartości (np. 1,3)");
         System.out.println("  s, start              - Rozpoczęcie meczu (gdy w pokoju jest min. 2 graczy)");
-        System.out.println("  d, draw               - Dobranie 1 karty z talii");
+        System.out.println("  d, draw               - Dobranie 1 karty z talii (lub przyjęcie kary ze stosu)");
         System.out.println("  p, pass               - Spasowanie tury (dozwolone po dobraniu karty)");
         System.out.println("  u, ultimo             - Zgłoszenie ULTIMO (gdy masz 1 lub 2 karty przed ruchem)");
-        System.out.println("  catch <gracz>         - Złapanie gracza, który nie powiedział ULTIMO (+2 karty kary)");
+        System.out.println("  catch <gracz>         - Złapanie gracza, który ma 1 kartę i nie powiedział ULTIMO (+2 karty kary)");
         System.out.println("  challenge, ch         - Wyzwanie legalności zagranej karty Wild Draw Four");
         System.out.println("  c <treść>             - Wysłanie wiadomości na czacie pokojowym");
         System.out.println("  t, table              - Ponowne wyświetlenie stołu i kart");
