@@ -17,5 +17,7 @@ public enum CommandType {
     CREATE_ROOM,
     LIST_ROOMS,
     KICK,
-    TRANSFER_OWNERSHIP;
+    TRANSFER_OWNERSHIP,
+    QUIT,
+    RECONNECT;
 }

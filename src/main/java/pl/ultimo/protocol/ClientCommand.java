@@ -137,4 +137,18 @@ public sealed interface ClientCommand {
             return CommandType.TRANSFER_OWNERSHIP;
         }
     }
+
+    record Quit() implements ClientCommand {
+        @Override
+        public CommandType type() {
+            return CommandType.QUIT;
+        }
+    }
+
+    record Reconnect(String username, String roomId, String token) implements ClientCommand {
+        @Override
+        public CommandType type() {
+            return CommandType.RECONNECT;
+        }
+    }
 }

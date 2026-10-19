@@ -91,6 +91,17 @@ public class ChaosMeshPhase2Runner {
                     }
                 } catch (Exception ignored) {}
             });
+
+            Thread.ofVirtual().name("tcp-heartbeat-" + username).start(() -> {
+                while (running) {
+                    try {
+                        Thread.sleep(8_000);
+                        if (running) {
+                            send("PING");
+                        }
+                    } catch (Exception ignored) {}
+                }
+            });
         }
 
         @Override
@@ -173,6 +184,12 @@ public class ChaosMeshPhase2Runner {
                                 private final StringBuilder buffer = new StringBuilder();
 
                                 @Override
+                                public CompletionStage<?> onPing(WebSocket webSocket, java.nio.ByteBuffer message) {
+                                    webSocket.sendPong(message);
+                                    return WebSocket.Listener.super.onPing(webSocket, message);
+                                }
+
+                                @Override
                                 public CompletionStage<?> onText(WebSocket webSocket, CharSequence data, boolean last) {
                                     buffer.append(data);
                                     if (last) {
@@ -208,6 +225,17 @@ public class ChaosMeshPhase2Runner {
                 throw (lastEx != null ? lastEx : new IOException("WebSocket connection failed after 8 attempts"));
             }
             this.ws = builtWs;
+
+            Thread.ofVirtual().name("ws-heartbeat-" + username).start(() -> {
+                while (running) {
+                    try {
+                        Thread.sleep(8_000);
+                        if (running) {
+                            send("PING");
+                        }
+                    } catch (Exception ignored) {}
+                }
+            });
         }
 
         @Override
@@ -352,12 +380,14 @@ public class ChaosMeshPhase2Runner {
             }
 
             // P1 plays RED DRAW_TWO (+2 penalty) with retry
+            p1.clearEvents();
+            p2.clearEvents();
             ServerEvent.TurnAnnounced t2 = null;
             for (int attempt = 0; attempt < 5; attempt++) {
-                p1.clearEvents();
-                p2.clearEvents();
-                p1.send("PLAY RED_DRAW_TWO");
-                t2 = p2.awaitEventType(ServerEvent.TurnAnnounced.class, Duration.ofSeconds(2));
+                if (p1.getHand().stream().anyMatch(c -> c.value() == pl.ultimo.core.model.CardValue.DRAW_TWO)) {
+                    p1.send("PLAY RED_DRAW_TWO");
+                }
+                t2 = p2.awaitEventType(ServerEvent.TurnAnnounced.class, Duration.ofSeconds(3));
                 if (t2 != null && t2.activePlayerName().equals(p2.getUsername())) {
                     break;
                 }
@@ -368,12 +398,14 @@ public class ChaosMeshPhase2Runner {
 
             // P2 defends with BLUE DRAW_TWO (+4 accumulated penalty) with retry
             int p3HandBefore = p3.getHand().size();
+            p2.clearEvents();
+            p3.clearEvents();
             ServerEvent.TurnAnnounced t3 = null;
             for (int attempt = 0; attempt < 5; attempt++) {
-                p2.clearEvents();
-                p3.clearEvents();
-                p2.send("PLAY BLUE_DRAW_TWO");
-                t3 = p3.awaitEventType(ServerEvent.TurnAnnounced.class, Duration.ofSeconds(2));
+                if (p2.getHand().stream().anyMatch(c -> c.value() == pl.ultimo.core.model.CardValue.DRAW_TWO)) {
+                    p2.send("PLAY BLUE_DRAW_TWO");
+                }
+                t3 = p3.awaitEventType(ServerEvent.TurnAnnounced.class, Duration.ofSeconds(3));
                 if (t3 != null && t3.activePlayerName().equals(p3.getUsername())) {
                     break;
                 }
@@ -383,11 +415,11 @@ public class ChaosMeshPhase2Runner {
             }
 
             // P3 accepts penalty with DRAW -> must draw 4 accumulated cards with retry
+            p3.clearEvents();
             ServerEvent.HandUpdate p3NewHand = null;
             for (int attempt = 0; attempt < 5; attempt++) {
-                p3.clearEvents();
                 p3.send("DRAW");
-                p3NewHand = p3.awaitEventType(ServerEvent.HandUpdate.class, Duration.ofSeconds(2));
+                p3NewHand = p3.awaitEventType(ServerEvent.HandUpdate.class, Duration.ofSeconds(3));
                 if (p3NewHand != null && p3NewHand.cards().size() >= p3HandBefore + 4) {
                     break;
                 }
@@ -408,12 +440,14 @@ public class ChaosMeshPhase2Runner {
             }
 
             // P1 plays RED SKIP
+            p1.clearEvents();
+            p2.clearEvents();
             ServerEvent.TurnAnnounced skipT2 = null;
             for (int attempt = 0; attempt < 5; attempt++) {
-                p1.clearEvents();
-                p2.clearEvents();
-                p1.send("PLAY RED_SKIP");
-                skipT2 = p2.awaitEventType(ServerEvent.TurnAnnounced.class, Duration.ofSeconds(2));
+                if (p1.getHand().stream().anyMatch(c -> c.value() == pl.ultimo.core.model.CardValue.SKIP)) {
+                    p1.send("PLAY RED_SKIP");
+                }
+                skipT2 = p2.awaitEventType(ServerEvent.TurnAnnounced.class, Duration.ofSeconds(3));
                 if (skipT2 != null && skipT2.activePlayerName().equals(p2.getUsername())) {
                     break;
                 }
@@ -423,12 +457,14 @@ public class ChaosMeshPhase2Runner {
             }
 
             // P2 defends with BLUE SKIP -> deflecting to P3
+            p2.clearEvents();
+            p3.clearEvents();
             ServerEvent.TurnAnnounced skipT3 = null;
             for (int attempt = 0; attempt < 5; attempt++) {
-                p2.clearEvents();
-                p3.clearEvents();
-                p2.send("PLAY BLUE_SKIP");
-                skipT3 = p3.awaitEventType(ServerEvent.TurnAnnounced.class, Duration.ofSeconds(2));
+                if (p2.getHand().stream().anyMatch(c -> c.value() == pl.ultimo.core.model.CardValue.SKIP)) {
+                    p2.send("PLAY BLUE_SKIP");
+                }
+                skipT3 = p3.awaitEventType(ServerEvent.TurnAnnounced.class, Duration.ofSeconds(3));
                 if (skipT3 != null && skipT3.activePlayerName().equals(p3.getUsername())) {
                     break;
                 }
@@ -438,12 +474,12 @@ public class ChaosMeshPhase2Runner {
             }
 
             // P3 has no Skip and sends PASS
+            p3.clearEvents();
+            p4.clearEvents();
             ServerEvent.TurnAnnounced skipT4 = null;
             for (int attempt = 0; attempt < 5; attempt++) {
-                p3.clearEvents();
-                p4.clearEvents();
                 p3.send("PASS");
-                skipT4 = p4.awaitEventType(ServerEvent.TurnAnnounced.class, Duration.ofSeconds(2));
+                skipT4 = p4.awaitEventType(ServerEvent.TurnAnnounced.class, Duration.ofSeconds(3));
                 if (skipT4 != null && skipT4.activePlayerName().equals(p4.getUsername())) {
                     break;
                 }
@@ -468,28 +504,50 @@ public class ChaosMeshPhase2Runner {
             Thread.sleep(300);
 
             // 15 players shed their 1 card sequentially
+            java.util.Set<String> finishedClients = new java.util.HashSet<>();
             for (int i = 0; i < 15; i++) {
                 ClientBase activeNow = null;
                 for (ClientBase c : clients) {
-                    if (!c.getHand().isEmpty()) {
+                    if (!finishedClients.contains(c.getUsername()) && !c.getHand().isEmpty()) {
                         activeNow = c;
                         break;
                     }
                 }
-                if (activeNow == null) break;
+                if (activeNow == null) {
+                    System.out.println("  [PODIUM-DEBUG] Iteration " + i + ": activeNow is NULL! No clients have remaining cards.");
+                    break;
+                }
 
                 Card toPlay = activeNow.getHand().get(0);
                 String cardToken = ProtocolCodec.formatCard(toPlay);
                 final String curName = activeNow.getUsername();
+                System.out.println("  [PODIUM-DEBUG] [" + (i + 1) + "/15] Player " + curName + " playing " + cardToken);
+                boolean finished = false;
                 for (int attempt = 0; attempt < 5; attempt++) {
                     activeNow.send("PLAY " + cardToken);
                     ServerEvent ev = p1.awaitEvent(
-                            e -> e instanceof ServerEvent.PlayerFinished finished && finished.playerName().equals(curName),
+                            e -> e instanceof ServerEvent.PlayerFinished pf && pf.playerName().equals(curName),
                             Duration.ofSeconds(2)
                     );
-                    if (ev != null || activeNow.getHand().isEmpty()) {
+                    if (ev != null) {
+                        System.out.println("    -> " + curName + " finish confirmed: " + ev);
+                        finished = true;
+                        finishedClients.add(curName);
                         break;
                     }
+                    if (activeNow.getHand().isEmpty()) {
+                        System.out.println("    -> " + curName + " hand is empty!");
+                        finished = true;
+                        finishedClients.add(curName);
+                        break;
+                    }
+                    ServerEvent err = activeNow.awaitEventType(ServerEvent.ErrorEvent.class, Duration.ofMillis(300));
+                    if (err != null) {
+                        System.err.println("    -> ERROR for " + curName + ": " + ((ServerEvent.ErrorEvent) err).errorMessage());
+                    }
+                }
+                if (!finished) {
+                    System.err.println("  [PODIUM-DEBUG] Failed to finish player " + curName);
                 }
                 Thread.sleep(150);
             }
@@ -499,6 +557,7 @@ public class ChaosMeshPhase2Runner {
             for (ClientBase c : clients) {
                 standings = c.awaitEventType(ServerEvent.MatchStandings.class, Duration.ofSeconds(4));
                 if (standings != null && standings.placements().size() == totalPlayers) {
+                    System.out.println("  [PODIUM-DEBUG] Received standings on " + c.getUsername() + ": " + standings.placements());
                     break;
                 }
             }
@@ -542,20 +601,31 @@ public class ChaosMeshPhase2Runner {
             int g2InitialCardCount = g2Hand != null ? g2Hand.cards().size() : 7;
 
             // Grace_Rejoiner abruptly severs socket connection
+            g1.clearEvents();
             g2.disconnectAbruptly();
-            Thread.sleep(400);
 
-            // Reconnect within 120s grace period with a fresh socket
+            // Wait for host g1 to receive notification that room status changed due to disconnect
+            ServerEvent.RoomStatus hostRoomStatus = g1.awaitEventType(
+                    ServerEvent.RoomStatus.class,
+                    Duration.ofSeconds(4)
+            );
+            Thread.sleep(1000);
+
+            // Reconnect within 120s grace period over resilient proxy socket
             TcpTestClient g2Reconnected = new TcpTestClient("Grace_Rejoiner", "127.0.0.1", proxyPort);
             clients.add(g2Reconnected);
             ServerEvent.HandUpdate restoredHand = null;
-            for (int attempt = 0; attempt < 5; attempt++) {
-                g2Reconnected.clearEvents();
+            for (int attempt = 0; attempt < 8; attempt++) {
                 g2Reconnected.send("JOIN Grace_Rejoiner " + graceRoomId + " 2");
                 restoredHand = g2Reconnected.awaitEventType(ServerEvent.HandUpdate.class, Duration.ofSeconds(2));
                 if (restoredHand != null) {
                     break;
                 }
+                ServerEvent.ErrorEvent err = g2Reconnected.awaitEventType(ServerEvent.ErrorEvent.class, Duration.ofMillis(300));
+                if (err != null) {
+                    System.err.println("  [GRACE-DEBUG] Error on rejoin attempt " + attempt + ": " + err.errorMessage());
+                }
+                Thread.sleep(250);
             }
 
             if (restoredHand == null) {

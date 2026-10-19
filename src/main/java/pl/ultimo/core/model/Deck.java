@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Deque;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Random;
 
@@ -32,7 +33,11 @@ public class Deck {
 
     public Deck(Random random) {
         this.cards = new ArrayDeque<>();
-        this.random = random;
+        this.random = Objects.requireNonNull(random, "random must not be null");
+    }
+
+    public Deck(long seed) {
+        this(new Random(seed));
     }
 
     /**
@@ -46,11 +51,19 @@ public class Deck {
         return createMultiDeck(1, random);
     }
 
+    public static Deck createStandardDeck(long seed) {
+        return createStandardDeck(new Random(seed));
+    }
+
     /**
      * Creates and shuffles multiple combined standard 108-card decks (e.g. 2 decks = 216 cards).
      */
     public static Deck createMultiDeck(int deckCount) {
         return createMultiDeck(deckCount, new Random());
+    }
+
+    public static Deck createMultiDeck(int deckCount, long seed) {
+        return createMultiDeck(deckCount, new Random(seed));
     }
 
     public static Deck createMultiDeck(int deckCount, Random random) {
@@ -104,6 +117,10 @@ public class Deck {
      */
     public static Deck createDeckForPlayerCount(int playerCount) {
         return createDeckForPlayerCount(playerCount, new Random());
+    }
+
+    public static Deck createDeckForPlayerCount(int playerCount, long seed) {
+        return createDeckForPlayerCount(playerCount, new Random(seed));
     }
 
     public static Deck createDeckForPlayerCount(int playerCount, Random random) {

@@ -203,6 +203,12 @@ public class ServerApp implements ConnectionListener {
 
     @Override
     public void onCommandReceived(ClientSession session, ClientCommand command) {
+        if (isShuttingDown.get()) {
+            session.sendEvent(new ServerEvent.ServerShutdown(config.shutdownDrainSeconds()));
+            session.sendEvent(new ServerEvent.ErrorEvent("SERVER_SHUTTING_DOWN: Server is shutting down"));
+            return;
+        }
+
         if (command instanceof ClientCommand.Ping) {
             session.sendEvent(new ServerEvent.Pong());
             return;

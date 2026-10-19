@@ -2,6 +2,7 @@ package pl.ultimo.protocol;
 
 import pl.ultimo.core.model.Card;
 import pl.ultimo.core.model.CardColor;
+import pl.ultimo.core.model.CardValue;
 
 import java.util.List;
 
@@ -12,7 +13,11 @@ public sealed interface ServerEvent {
 
     EventType type();
 
-    record Welcome(String assignedPlayerId, String message) implements ServerEvent {
+    record Welcome(String assignedPlayerId, String reconnectToken, String message) implements ServerEvent {
+        public Welcome(String assignedPlayerId, String message) {
+            this(assignedPlayerId, assignedPlayerId, message);
+        }
+
         @Override
         public EventType type() {
             return EventType.WELCOME;
@@ -161,6 +166,20 @@ public sealed interface ServerEvent {
         @Override
         public EventType type() {
             return EventType.MATCH_STANDINGS;
+        }
+    }
+
+    record ActionDefenseState(CardValue defenseType, int accumulatedPenalty, String targetPlayer) implements ServerEvent {
+        @Override
+        public EventType type() {
+            return EventType.ACTION_DEFENSE_STATE;
+        }
+    }
+
+    record PlayerState(String username, String status, int graceSecondsRemaining) implements ServerEvent {
+        @Override
+        public EventType type() {
+            return EventType.PLAYER_STATE;
         }
     }
 }
