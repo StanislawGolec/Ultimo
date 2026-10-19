@@ -46,6 +46,9 @@ public class GameRoom implements Runnable {
     private volatile RoomState state = RoomState.WAITING_FOR_PLAYERS;
     private UltimoEngine engine;
 
+    public static final int MIN_CAPACITY = 2;
+    public static final int MAX_CAPACITY = 16;
+
     public record RoomCommandEvent(ClientSession session, ClientCommand command) {}
 
     public GameRoom(String roomId, int maxPlayers) {
@@ -54,8 +57,8 @@ public class GameRoom implements Runnable {
 
     public GameRoom(String roomId, int maxPlayers, Random random) {
         this.roomId = Objects.requireNonNull(roomId, "roomId must not be null");
-        if (maxPlayers < 2) {
-            throw new IllegalArgumentException("Room capacity must be at least 2");
+        if (maxPlayers < MIN_CAPACITY || maxPlayers > MAX_CAPACITY) {
+            throw new IllegalArgumentException("Room capacity must be between " + MIN_CAPACITY + " and " + MAX_CAPACITY + " players");
         }
         this.maxPlayers = maxPlayers;
         this.random = Objects.requireNonNull(random, "random must not be null");

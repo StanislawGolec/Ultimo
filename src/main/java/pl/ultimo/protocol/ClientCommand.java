@@ -12,9 +12,13 @@ public sealed interface ClientCommand {
 
     CommandType type();
 
-    record Join(String username, String roomId) implements ClientCommand {
+    record Join(String username, String roomId, Integer maxPlayers) implements ClientCommand {
         public Join(String username) {
-            this(username, null);
+            this(username, null, null);
+        }
+
+        public Join(String username, String roomId) {
+            this(username, roomId, null);
         }
 
         @Override

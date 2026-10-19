@@ -168,4 +168,21 @@ class RoomManagerTest {
         assertEquals(1, r1.getPlayerCount());
         assertEquals(1, r2.getPlayerCount());
     }
+
+    @Test
+    @DisplayName("Matchmaking and targeted joining support custom capacity between 2 and 16 players")
+    void customCapacityRoomCreation() throws Exception {
+        // First matchmake creates room-1 with custom capacity 12 on empty server
+        ClientSession player = createDummySession("s-p", "Player");
+        GameRoom mmRoom = roomManager.matchmake(player, "Player", 12);
+        assertEquals(12, mmRoom.getMaxPlayers());
+        assertEquals(1, mmRoom.getPlayerCount());
+
+        // Targeted joining creates big-table with capacity 16
+        ClientSession host = createDummySession("s-host", "Host");
+        GameRoom room = roomManager.joinRoom(host, "Host", "big-table", 16);
+        assertEquals(16, room.getMaxPlayers());
+        assertEquals("big-table", room.getRoomId());
+        assertEquals(1, room.getPlayerCount());
+    }
 }

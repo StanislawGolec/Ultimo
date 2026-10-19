@@ -199,7 +199,7 @@ public class ClientSession implements Runnable, Closeable {
             contentType = "text/plain";
             triggerShutdown = true;
         } else {
-            body = WebClientAssets.getHtmlPage().getBytes(StandardCharsets.UTF_8);
+            body = WebClientAssets.getHtmlBytes();
             contentType = "text/html; charset=UTF-8";
         }
 

@@ -23,6 +23,26 @@ class ProtocolCodecTest {
         // Multi-word username
         ClientCommand multiWord = ProtocolCodec.decodeCommand("JOIN Alice The Great");
         assertEquals("Alice The Great", ((ClientCommand.Join) multiWord).username());
+
+        // Join with room and capacity
+        ClientCommand joinRoomCap = ProtocolCodec.decodeCommand("JOIN Alice room-1 16");
+        assertInstanceOf(ClientCommand.Join.class, joinRoomCap);
+        ClientCommand.Join jrc = (ClientCommand.Join) joinRoomCap;
+        assertEquals("Alice", jrc.username());
+        assertEquals("room-1", jrc.roomId());
+        assertEquals(16, jrc.maxPlayers());
+
+        // Join with capacity only (matchmaking)
+        ClientCommand joinCap = ProtocolCodec.decodeCommand("JOIN Bob 8");
+        assertInstanceOf(ClientCommand.Join.class, joinCap);
+        ClientCommand.Join jc = (ClientCommand.Join) joinCap;
+        assertEquals("Bob", jc.username());
+        assertNull(jc.roomId());
+        assertEquals(8, jc.maxPlayers());
+
+        // Roundtrip serialization
+        assertEquals("JOIN Alice room-1 16\n", ProtocolCodec.encodeCommand(jrc));
+        assertEquals("JOIN Bob 8\n", ProtocolCodec.encodeCommand(jc));
     }
 
     @Test

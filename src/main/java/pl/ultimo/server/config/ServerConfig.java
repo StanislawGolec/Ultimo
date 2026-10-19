@@ -16,11 +16,14 @@ public record ServerConfig(
         int reconnectGracePeriodSeconds,
         int shutdownDrainSeconds
 ) {
+    public static final int MIN_ROOM_CAPACITY = 2;
+    public static final int MAX_ROOM_CAPACITY = 16;
+
     public ServerConfig(int port, int defaultRoomCapacity, int socketReadTimeoutMillis, int reconnectGracePeriodSeconds) {
         this(port, defaultRoomCapacity, socketReadTimeoutMillis, reconnectGracePeriodSeconds, 5);
     }
 
     public static ServerConfig defaultConfiguration() {
-        return new ServerConfig(8080, 4, 60_000, 30, 5);
+        return new ServerConfig(8080, 16, 60_000, 30, 5);
     }
 }

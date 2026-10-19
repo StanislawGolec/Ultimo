@@ -6,7 +6,14 @@ package pl.ultimo.server.net;
  */
 public final class WebClientAssets {
 
+    public static final String INDEX_HTML = getHtmlPage();
+    public static final byte[] INDEX_HTML_BYTES = INDEX_HTML.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+
     private WebClientAssets() {
+    }
+
+    public static byte[] getHtmlBytes() {
+        return INDEX_HTML_BYTES;
     }
 
     public static String getHtmlPage() {
@@ -50,11 +57,12 @@ public final class WebClientAssets {
     main { flex: 1; display: grid; grid-template-columns: 1fr 340px; gap: 16px; padding: 16px; max-width: 1400px; margin: 0 auto; width: 100%; }
     @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
     .table-container { background: radial-gradient(circle, var(--felt) 0%, #022c22 100%); border-radius: 16px; border: 3px solid #047857; box-shadow: inset 0 0 40px rgba(0,0,0,0.6); display: flex; flex-direction: column; justify-content: space-between; padding: 20px; min-height: 580px; position: relative; }
-    .opponents-bar { display: flex; justify-content: center; gap: 16px; min-height: 80px; flex-wrap: wrap; }
-    .opponent-card { background: rgba(15, 23, 42, 0.85); border: 1px solid #334155; border-radius: 10px; padding: 8px 16px; display: flex; flex-direction: column; align-items: center; gap: 4px; }
-    .opponent-card.turn { border-color: #facc15; box-shadow: 0 0 15px rgba(250, 204, 21, 0.5); }
-    .opponent-name { font-weight: 700; font-size: 0.9rem; }
-    .opponent-count { font-size: 0.8rem; color: var(--muted); }
+    .opponents-bar { display: flex; justify-content: center; gap: 8px; min-height: 52px; max-height: 130px; overflow-y: auto; flex-wrap: wrap; padding: 4px; align-content: flex-start; }
+    .opponent-card { background: rgba(15, 23, 42, 0.85); border: 1px solid #334155; border-radius: 8px; padding: 4px 10px; display: flex; flex-direction: row; align-items: center; gap: 8px; transition: all 0.15s ease; font-size: 0.85rem; }
+    .opponent-card.turn { border-color: #facc15; background: rgba(250, 204, 21, 0.15); box-shadow: 0 0 12px rgba(250, 204, 21, 0.5); }
+    .opponent-name { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 110px; }
+    .opponent-badge { background: #1e293b; border: 1px solid #475569; border-radius: 9999px; padding: 2px 8px; font-size: 0.75rem; font-weight: 700; color: #38bdf8; white-space: nowrap; }
+    .opponent-card.turn .opponent-badge { background: #facc15; color: #0f172a; border-color: #facc15; }
     .center-table { display: flex; align-items: center; justify-content: center; gap: 40px; margin: auto; }
     .pile-box { display: flex; flex-direction: column; align-items: center; gap: 8px; }
     .pile-label { font-size: 0.8rem; font-weight: 700; color: #a7f3d0; text-transform: uppercase; letter-spacing: 0.5px; }
@@ -352,9 +360,10 @@ public final class WebClientAssets {
 
             opponentsBar.innerHTML = '';
             playerNames.forEach(pName => {
+              const isMe = pName === myUsername;
               const div = document.createElement('div');
               div.className = 'opponent-card';
-              div.innerHTML = `<div class="opponent-name">${pName}</div><div class="opponent-count">${pName === myUsername ? '(You)' : 'Ready'}</div>`;
+              div.innerHTML = `<span class="opponent-name">${pName}</span><span class="opponent-badge">${isMe ? '(You)' : 'Ready'}</span>`;
               opponentsBar.appendChild(div);
             });
           }
@@ -504,9 +513,10 @@ public final class WebClientAssets {
       opponentsBar.innerHTML = '';
       opponentCounts.forEach((count, name) => {
         if (name !== myUsername) {
+          const isTurn = name === currentTurnPlayer;
           const div = document.createElement('div');
-          div.className = `opponent-card ${name === currentTurnPlayer ? 'turn' : ''}`;
-          div.innerHTML = `<div class="opponent-name">${name}</div><div class="opponent-count">${count} cards</div>`;
+          div.className = `opponent-card ${isTurn ? 'turn' : ''}`;
+          div.innerHTML = `<span class="opponent-name">${name}</span><span class="opponent-badge">${count} 🂠</span>`;
           opponentsBar.appendChild(div);
         }
       });

@@ -59,21 +59,44 @@ public final class ProtocolCodec {
             return switch (commandName) {
                 case "JOIN" -> {
                     if (parts.length < 2) {
-                        throw new ProtocolException("JOIN command requires a username: JOIN <username> [room_id]");
+                        throw new ProtocolException("JOIN command requires a username: JOIN <username> [room_id] [max_players]");
                     }
                     if (parts.length == 2) {
                         String username = parts[1];
                         if (!isValidUsername(username)) {
                             throw new ProtocolException("INVALID_USERNAME: Username must be 2-24 characters using word characters and standard symbols");
                         }
-                        yield new ClientCommand.Join(username, null);
+                        yield new ClientCommand.Join(username, null, null);
                     }
                     if (parts.length == 3) {
                         String username = parts[1];
                         if (!isValidUsername(username)) {
                             throw new ProtocolException("INVALID_USERNAME: Username must be 2-24 characters using word characters and standard symbols");
                         }
-                        yield new ClientCommand.Join(username, parts[2]);
+                        try {
+                            int cap = Integer.parseInt(parts[2]);
+                            if (cap >= 2 && cap <= 16) {
+                                yield new ClientCommand.Join(username, null, cap);
+                            }
+                        } catch (NumberFormatException ignored) {}
+                        yield new ClientCommand.Join(username, parts[2], null);
+                    }
+                    if (parts.length == 4) {
+                        String username = parts[1];
+                        String roomId = parts[2];
+                        Integer cap = null;
+                        try {
+                            int c = Integer.parseInt(parts[3]);
+                            if (c >= 2 && c <= 16) {
+                                cap = c;
+                            }
+                        } catch (NumberFormatException ignored) {}
+                        if (cap != null) {
+                            if (!isValidUsername(username)) {
+                                throw new ProtocolException("INVALID_USERNAME: Username must be 2-24 characters using word characters and standard symbols");
+                            }
+                            yield new ClientCommand.Join(username, roomId, cap);
+                        }
                     }
                     String lastToken = parts[parts.length - 1];
                     if (lastToken.toLowerCase().startsWith("room") || lastToken.toLowerCase().startsWith("r-")
@@ -83,13 +106,13 @@ public final class ProtocolCodec {
                         if (!isValidUsername(username)) {
                             throw new ProtocolException("INVALID_USERNAME: Username must be 2-24 characters using word characters and standard symbols");
                         }
-                        yield new ClientCommand.Join(username, lastToken);
+                        yield new ClientCommand.Join(username, lastToken, null);
                     } else {
                         String username = line.substring(line.indexOf(' ') + 1).trim();
                         if (!isValidUsername(username)) {
                             throw new ProtocolException("INVALID_USERNAME: Username must be 2-24 characters using word characters and standard symbols");
                         }
-                        yield new ClientCommand.Join(username, null);
+                        yield new ClientCommand.Join(username, null, null);
                     }
                 }
                 case "PLAY" -> {
@@ -168,7 +191,12 @@ public final class ProtocolCodec {
         return switch (command) {
             case ClientCommand.Join join -> {
                 if (join.roomId() != null && !join.roomId().isBlank()) {
+                    if (join.maxPlayers() != null) {
+                        yield "JOIN " + join.username() + " " + join.roomId() + " " + join.maxPlayers() + "\n";
+                    }
                     yield "JOIN " + join.username() + " " + join.roomId() + "\n";
+                } else if (join.maxPlayers() != null) {
+                    yield "JOIN " + join.username() + " " + join.maxPlayers() + "\n";
                 } else {
                     yield "JOIN " + join.username() + "\n";
                 }

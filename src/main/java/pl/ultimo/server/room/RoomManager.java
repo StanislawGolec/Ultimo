@@ -36,6 +36,15 @@ public class RoomManager {
      * Uses ReentrantLock to prevent Project Loom carrier thread pinning.
      */
     public GameRoom matchmake(ClientSession session, String username) {
+        return matchmake(session, username, config.defaultRoomCapacity());
+    }
+
+    /**
+     * Finds an open room with capacity or creates a new one with the target capacity, enrolling the player.
+     * Uses ReentrantLock to prevent Project Loom carrier thread pinning.
+     */
+    public GameRoom matchmake(ClientSession session, String username, int capacity) {
+        int targetCapacity = Math.clamp(capacity, GameRoom.MIN_CAPACITY, GameRoom.MAX_CAPACITY);
         matchmakeLock.lock();
         try {
             // Look for an existing room waiting for players that doesn't already contain this username
@@ -51,7 +60,7 @@ public class RoomManager {
 
             // If no available room, spin up a new room
             String roomId = "room-" + roomCounter.getAndIncrement();
-            GameRoom newRoom = new GameRoom(roomId, config.defaultRoomCapacity());
+            GameRoom newRoom = new GameRoom(roomId, targetCapacity);
             newRoom.addPlayer(session, username);
 
             activeRooms.put(roomId, newRoom);
@@ -66,19 +75,24 @@ public class RoomManager {
         }
     }
 
+    public GameRoom joinRoom(ClientSession session, String username, String roomId) {
+        return joinRoom(session, username, roomId, config.defaultRoomCapacity());
+    }
+
     /**
      * Enrolls player in a targeted room by ID, creating the room if it doesn't already exist.
      */
-    public GameRoom joinRoom(ClientSession session, String username, String roomId) {
+    public GameRoom joinRoom(ClientSession session, String username, String roomId, int capacity) {
         if (roomId == null || roomId.isBlank()) {
-            return matchmake(session, username);
+            return matchmake(session, username, capacity);
         }
 
+        int targetCapacity = Math.clamp(capacity, GameRoom.MIN_CAPACITY, GameRoom.MAX_CAPACITY);
         matchmakeLock.lock();
         try {
             GameRoom room = activeRooms.get(roomId);
             if (room == null) {
-                room = new GameRoom(roomId, config.defaultRoomCapacity());
+                room = new GameRoom(roomId, targetCapacity);
                 activeRooms.put(roomId, room);
                 roomExecutor.submit(room);
             }

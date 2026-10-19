@@ -103,7 +103,7 @@ public class UltimoEngine {
         this.players = List.copyOf(players);
         this.random = Objects.requireNonNull(random, "random must not be null");
         this.targetScore = targetScore > 0 ? targetScore : DEFAULT_TARGET_SCORE;
-        this.deck = Deck.createStandardDeck(random);
+        this.deck = Deck.createDeckForPlayerCount(this.players.size(), random);
         this.discardPile = new DiscardPile();
         this.turnManager = new TurnManager(this.players);
 
@@ -154,7 +154,7 @@ public class UltimoEngine {
             return false;
         }
 
-        this.deck = Deck.createStandardDeck(random);
+        this.deck = Deck.createDeckForPlayerCount(this.players.size(), random);
         this.discardPile = new DiscardPile();
 
         for (Player p : players) {

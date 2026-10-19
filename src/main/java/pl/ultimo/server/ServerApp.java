@@ -239,10 +239,11 @@ public class ServerApp implements ConnectionListener {
                 session.setUsername(join.username());
                 session.sendEvent(new ServerEvent.Welcome(session.getSessionId(), "Welcome to Ultimo, " + join.username() + "!"));
 
+                int capacity = join.maxPlayers() != null ? join.maxPlayers() : config.defaultRoomCapacity();
                 if (targetRoomId != null && !targetRoomId.isBlank()) {
-                    roomManager.joinRoom(session, join.username(), targetRoomId);
+                    roomManager.joinRoom(session, join.username(), targetRoomId, capacity);
                 } else {
-                    roomManager.matchmake(session, join.username());
+                    roomManager.matchmake(session, join.username(), capacity);
                 }
                 return;
             } finally {

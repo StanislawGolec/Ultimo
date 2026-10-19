@@ -80,4 +80,47 @@ class DeckTest {
         assertEquals(2, deck.size());
         assertFalse(deck.isEmpty());
     }
+
+    @Test
+    @DisplayName("Combined 2-deck set should contain exactly 216 cards with proportional distribution")
+    void combinedTwoDeckSetShouldContain216Cards() {
+        Deck multiDeck = Deck.createMultiDeck(2);
+        assertEquals(216, multiDeck.size());
+
+        List<Card> cards = new ArrayList<>();
+        while (!multiDeck.isEmpty()) {
+            cards.add(multiDeck.draw().orElseThrow());
+        }
+        assertEquals(216, cards.size());
+
+        long zeroCount = cards.stream().filter(c -> c.value() == CardValue.ZERO).count();
+        long wildCount = cards.stream().filter(c -> c.value() == CardValue.WILD).count();
+        long wildDrawFourCount = cards.stream().filter(c -> c.value() == CardValue.WILD_DRAW_FOUR).count();
+        long skipCount = cards.stream().filter(c -> c.value() == CardValue.SKIP).count();
+        long reverseCount = cards.stream().filter(c -> c.value() == CardValue.REVERSE).count();
+        long drawTwoCount = cards.stream().filter(c -> c.value() == CardValue.DRAW_TWO).count();
+
+        assertEquals(8, zeroCount, "2 decks must have 8 Zero cards (2 per color)");
+        assertEquals(8, wildCount, "2 decks must have 8 Wild cards");
+        assertEquals(8, wildDrawFourCount, "2 decks must have 8 Wild Draw Four cards");
+        assertEquals(16, skipCount, "2 decks must have 16 Skip cards (4 per color)");
+        assertEquals(16, reverseCount, "2 decks must have 16 Reverse cards (4 per color)");
+        assertEquals(16, drawTwoCount, "2 decks must have 16 Draw Two cards (4 per color)");
+    }
+
+    @Test
+    @DisplayName("createDeckForPlayerCount dynamically scales deck based on player count")
+    void deckScalesDynamicallyBasedOnPlayerCount() {
+        // <= 8 players uses 1 deck (108 cards)
+        assertEquals(108, Deck.createDeckForPlayerCount(2).size());
+        assertEquals(108, Deck.createDeckForPlayerCount(4).size());
+        assertEquals(108, Deck.createDeckForPlayerCount(8).size());
+
+        // > 8 players uses 2 decks (216 cards)
+        assertEquals(216, Deck.createDeckForPlayerCount(9).size());
+        assertEquals(216, Deck.createDeckForPlayerCount(12).size());
+        assertEquals(216, Deck.createDeckForPlayerCount(16).size());
+
+        assertThrows(IllegalArgumentException.class, () -> Deck.createMultiDeck(0));
+    }
 }

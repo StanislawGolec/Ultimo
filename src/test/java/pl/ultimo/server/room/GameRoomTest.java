@@ -482,4 +482,48 @@ class GameRoomTest {
                 .anyMatch(e -> e instanceof ServerEvent.ErrorEvent err && err.errorMessage().contains("NAME_TAKEN"));
         assertTrue(gotNameTakenError2);
     }
+
+    @Test
+    @DisplayName("Support 16 players in a single room with 216-card combined deck and turn progression")
+    void shouldSupportSixteenPlayersInSingleRoom() throws Exception {
+        GameRoom room = new GameRoom("room-16p", 16);
+        executor.submit(room);
+
+        List<TestClient> clients = new ArrayList<>();
+        for (int i = 1; i <= 16; i++) {
+            TestClient client = createTestClient("s-" + i, "Player" + i);
+            clients.add(client);
+            assertTrue(room.addPlayer(client.session, "Player" + i));
+        }
+
+        assertEquals(16, room.getPlayerCount());
+        assertTrue(room.isFull());
+        assertEquals(RoomState.IN_PROGRESS, room.getState(), "Room should auto-start when 16th player joins");
+
+        Thread.sleep(300);
+        for (TestClient tc : clients) {
+            tc.drainEvents();
+            boolean gotHandUpdate = tc.receivedEvents.stream()
+                    .anyMatch(e -> e instanceof ServerEvent.HandUpdate hu && hu.cards().size() == 7);
+            assertTrue(gotHandUpdate, "All 16 players should receive initial 7 cards");
+        }
+
+        assertNotNull(room.getEngine());
+        assertEquals(16, room.getEngine().getPlayers().size());
+        assertEquals(103, room.getEngine().getDeck().size());
+
+        // The current turn player draws a card
+        String activePlayerName = room.getEngine().getTurnManager().getCurrentPlayer().getUsername();
+        TestClient activeClient = clients.stream()
+                .filter(c -> c.session.getUsername().equals(activePlayerName))
+                .findFirst().orElseThrow();
+
+        room.enqueueCommand(activeClient.session, new ClientCommand.Draw());
+        Thread.sleep(150);
+        activeClient.drainEvents();
+
+        boolean gotDrawResult = activeClient.receivedEvents.stream()
+                .anyMatch(e -> e instanceof ServerEvent.DrawResult);
+        assertTrue(gotDrawResult, "Active player should receive DRAW_RESULT in 16-player game");
+    }
 }

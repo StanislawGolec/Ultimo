@@ -10,6 +10,7 @@ import pl.ultimo.core.model.Player;
 import pl.ultimo.core.state.Direction;
 import pl.ultimo.core.state.GameState;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -337,5 +338,36 @@ class UltimoEngineTest {
         assertTrue(result.success());
 
         assertEquals(current, engine.getTurnManager().getCurrentPlayer());
+    }
+
+    @Test
+    @DisplayName("16 players are dealt starting hands from a combined 216-card deck without exhaustion")
+    void testSixteenPlayersDealtFromCombinedDeck() {
+        List<Player> sixteenPlayers = new ArrayList<>();
+        for (int i = 1; i <= 16; i++) {
+            sixteenPlayers.add(new Player(String.valueOf(i), "Player_" + i));
+        }
+
+        UltimoEngine engine = new UltimoEngine(sixteenPlayers);
+        assertEquals(216, engine.getDeck().size(), "16 players must trigger 2 combined decks (216 cards)");
+
+        engine.start();
+
+        // 16 players * 7 cards = 112 dealt
+        for (Player p : sixteenPlayers) {
+            assertEquals(7, p.getHand().size());
+        }
+
+        assertTrue(engine.getDiscardPile().getTopCard().isPresent());
+        // 216 - 112 dealt - 1 on discard = 103 remaining
+        assertEquals(103, engine.getDeck().size());
+        assertTrue(engine.isGameStarted());
+        assertFalse(engine.isGameOver());
+
+        // Player 1 can draw or play without errors
+        Player p1 = engine.getTurnManager().getCurrentPlayer();
+        Optional<Card> drawn = engine.drawCard(p1);
+        assertTrue(drawn.isPresent());
+        assertEquals(8, p1.getHand().size());
     }
 }

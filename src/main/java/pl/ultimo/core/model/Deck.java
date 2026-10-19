@@ -43,42 +43,72 @@ public class Deck {
     }
 
     public static Deck createStandardDeck(Random random) {
-        Deck deck = new Deck(random);
-        List<Card> initialCards = new ArrayList<>(108);
+        return createMultiDeck(1, random);
+    }
 
-        for (CardColor color : CardColor.values()) {
-            if (!color.isStandardColor()) {
-                continue;
-            }
+    /**
+     * Creates and shuffles multiple combined standard 108-card decks (e.g. 2 decks = 216 cards).
+     */
+    public static Deck createMultiDeck(int deckCount) {
+        return createMultiDeck(deckCount, new Random());
+    }
 
-            // Exactly one 0 per color
-            initialCards.add(new Card(color, CardValue.ZERO));
-
-            // Two of each 1-9 per color
-            for (int number = 1; number <= 9; number++) {
-                CardValue val = CardValue.valueOf(getNumberName(number));
-                initialCards.add(new Card(color, val));
-                initialCards.add(new Card(color, val));
-            }
-
-            // Two of each action card per color
-            initialCards.add(new Card(color, CardValue.SKIP));
-            initialCards.add(new Card(color, CardValue.SKIP));
-            initialCards.add(new Card(color, CardValue.REVERSE));
-            initialCards.add(new Card(color, CardValue.REVERSE));
-            initialCards.add(new Card(color, CardValue.DRAW_TWO));
-            initialCards.add(new Card(color, CardValue.DRAW_TWO));
+    public static Deck createMultiDeck(int deckCount, Random random) {
+        if (deckCount < 1) {
+            throw new IllegalArgumentException("deckCount must be at least 1");
         }
+        Deck deck = new Deck(random);
+        List<Card> initialCards = new ArrayList<>(108 * deckCount);
 
-        // Four Wild cards and four Wild Draw Four cards
-        for (int i = 0; i < 4; i++) {
-            initialCards.add(new Card(CardColor.WILD, CardValue.WILD));
-            initialCards.add(new Card(CardColor.WILD, CardValue.WILD_DRAW_FOUR));
+        for (int d = 0; d < deckCount; d++) {
+            for (CardColor color : CardColor.values()) {
+                if (!color.isStandardColor()) {
+                    continue;
+                }
+
+                // Exactly one 0 per color
+                initialCards.add(new Card(color, CardValue.ZERO));
+
+                // Two of each 1-9 per color
+                for (int number = 1; number <= 9; number++) {
+                    CardValue val = CardValue.valueOf(getNumberName(number));
+                    initialCards.add(new Card(color, val));
+                    initialCards.add(new Card(color, val));
+                }
+
+                // Two of each action card per color
+                initialCards.add(new Card(color, CardValue.SKIP));
+                initialCards.add(new Card(color, CardValue.SKIP));
+                initialCards.add(new Card(color, CardValue.REVERSE));
+                initialCards.add(new Card(color, CardValue.REVERSE));
+                initialCards.add(new Card(color, CardValue.DRAW_TWO));
+                initialCards.add(new Card(color, CardValue.DRAW_TWO));
+            }
+
+            // Four Wild cards and four Wild Draw Four cards
+            for (int i = 0; i < 4; i++) {
+                initialCards.add(new Card(CardColor.WILD, CardValue.WILD));
+                initialCards.add(new Card(CardColor.WILD, CardValue.WILD_DRAW_FOUR));
+            }
         }
 
         Collections.shuffle(initialCards, random);
         deck.cards.addAll(initialCards);
         return deck;
+    }
+
+    /**
+     * Dynamically sizes the deck based on the number of players:
+     * - 2 to 8 players: 1 standard 108-card deck.
+     * - 9 to 16 players: 2 combined standard decks (216 cards).
+     */
+    public static Deck createDeckForPlayerCount(int playerCount) {
+        return createDeckForPlayerCount(playerCount, new Random());
+    }
+
+    public static Deck createDeckForPlayerCount(int playerCount, Random random) {
+        int deckCount = playerCount > 8 ? 2 : 1;
+        return createMultiDeck(deckCount, random);
     }
 
     public void shuffle() {
