@@ -139,6 +139,11 @@ class MetricsRegistryTest {
         assertTrue(exposition.contains("ultimo_active_connections{transport=\"tcp\"} 1"));
         assertTrue(exposition.contains("ultimo_active_connections{transport=\"websocket\"} 1"));
 
+        assertTrue(exposition.contains("# HELP ultimo_connections_total"), "Must declare connections_total HELP");
+        assertTrue(exposition.contains("# TYPE ultimo_connections_total counter"), "Must declare connections_total TYPE");
+        assertTrue(exposition.contains("ultimo_connections_total{transport=\"tcp\"} 1"));
+        assertTrue(exposition.contains("ultimo_connections_total{transport=\"websocket\"} 1"));
+
         assertTrue(exposition.contains("# HELP ultimo_active_rooms"), "Must declare active_rooms HELP");
         assertTrue(exposition.contains("ultimo_active_rooms 2"));
 

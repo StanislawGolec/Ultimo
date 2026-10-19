@@ -182,7 +182,7 @@ class ProtocolCodecTest {
     @Test
     @DisplayName("Should encode ServerEvents to wire format")
     void shouldEncodeServerEvents() {
-        assertEquals("WELCOME id-1 Hello!\n", ProtocolCodec.encodeEvent(new ServerEvent.Welcome("id-1", "Hello!")));
+        assertEquals("WELCOME id-1 tok-1 Hello!\n", ProtocolCodec.encodeEvent(new ServerEvent.Welcome("id-1", "tok-1", "Hello!")));
         assertEquals("ROOM_STATUS r-1 2 4 Alice,Bob\n", ProtocolCodec.encodeEvent(new ServerEvent.RoomStatus("r-1", 2, 4, List.of("Alice", "Bob"))));
         assertEquals("TOP_CARD RED_FIVE RED\n", ProtocolCodec.encodeEvent(new ServerEvent.TopCard(new Card(CardColor.RED, CardValue.FIVE), CardColor.RED)));
         assertEquals("TURN_ANNOUNCED Alice\n", ProtocolCodec.encodeEvent(new ServerEvent.TurnAnnounced("Alice")));
@@ -194,13 +194,17 @@ class ProtocolCodecTest {
         assertEquals("ULTIMO_PENALTY Bob Alice 2\n", ProtocolCodec.encodeEvent(new ServerEvent.UltimoPenalty("Bob", "Alice", 2)));
         assertEquals("CHALLENGE_RESULT Alice Bob GUILTY Bob 4\n", ProtocolCodec.encodeEvent(new ServerEvent.ChallengeResult("Alice", "Bob", true, "Bob", 4)));
         assertEquals("ROUND_OVER Alice 85 IN_PROGRESS Alice:85,Bob:0\n", ProtocolCodec.encodeEvent(new ServerEvent.RoundOver("Alice", 85, java.util.Map.of("Alice", 85, "Bob", 0), false)));
+        assertEquals("DEFENSE_STATE DRAW_TWO 4 Bob\n", ProtocolCodec.encodeEvent(new ServerEvent.ActionDefenseState(CardValue.DRAW_TWO, 4, "Bob")));
+        assertEquals("DEFENSE_STATE NONE 0 Alice\n", ProtocolCodec.encodeEvent(new ServerEvent.ActionDefenseState(null, 0, "Alice")));
+        assertEquals("PLAYER_STATE Alice DISCONNECTED 120\n", ProtocolCodec.encodeEvent(new ServerEvent.PlayerState("Alice", "DISCONNECTED", 120)));
+        assertEquals("PLAYER_STATE Alice CONNECTED\n", ProtocolCodec.encodeEvent(new ServerEvent.PlayerState("Alice", "CONNECTED", 0)));
     }
 
     @Test
     @DisplayName("Should perform lossless round-trip serialization of ServerEvents")
     void shouldRoundTripServerEvents() throws ProtocolException {
         List<ServerEvent> testEvents = List.of(
-                new ServerEvent.Welcome("player-1", "Welcome to Ultimo server"),
+                new ServerEvent.Welcome("player-1", "tok-99", "Welcome to Ultimo server"),
                 new ServerEvent.RoomStatus("room-42", 3, 4, List.of("Alice", "Bob", "Charlie")),
                 new ServerEvent.HandUpdate(List.of(
                         new Card(CardColor.RED, CardValue.ZERO),
@@ -219,7 +223,11 @@ class ProtocolCodecTest {
                 new ServerEvent.UltimoDeclared("Alice"),
                 new ServerEvent.UltimoPenalty("Bob", "Alice", 2),
                 new ServerEvent.ChallengeResult("Alice", "Bob", true, "Bob", 4),
-                new ServerEvent.RoundOver("Alice", 85, java.util.Map.of("Alice", 85, "Bob", 0), false)
+                new ServerEvent.RoundOver("Alice", 85, java.util.Map.of("Alice", 85, "Bob", 0), false),
+                new ServerEvent.ActionDefenseState(CardValue.DRAW_TWO, 4, "Bob"),
+                new ServerEvent.ActionDefenseState(null, 0, "Alice"),
+                new ServerEvent.PlayerState("Alice", "DISCONNECTED", 120),
+                new ServerEvent.PlayerState("Bob", "CONNECTED", 0)
         );
 
         for (ServerEvent event : testEvents) {
@@ -470,4 +478,150 @@ class ProtocolCodecTest {
         assertInstanceOf(ServerEvent.MatchStandings.class, decodedEmptyMs);
         assertTrue(((ServerEvent.MatchStandings) decodedEmptyMs).placements().isEmpty());
     }
+
+    @Test
+    @DisplayName("Should decode and encode QUIT and RECONNECT commands")
+    void shouldDecodeAndEncodeQuitAndReconnectCommands() throws ProtocolException {
+        ClientCommand quitCmd = ProtocolCodec.decodeCommand("QUIT\n");
+        assertInstanceOf(ClientCommand.Quit.class, quitCmd);
+        assertEquals(CommandType.QUIT, quitCmd.type());
+        assertEquals("QUIT\n", ProtocolCodec.encodeCommand(quitCmd));
+
+        ClientCommand recCmd = ProtocolCodec.decodeCommand("RECONNECT Alice room-42 tok-secret-99\n");
+        assertInstanceOf(ClientCommand.Reconnect.class, recCmd);
+        ClientCommand.Reconnect rec = (ClientCommand.Reconnect) recCmd;
+        assertEquals(CommandType.RECONNECT, rec.type());
+        assertEquals("Alice", rec.username());
+        assertEquals("room-42", rec.roomId());
+        assertEquals("tok-secret-99", rec.token());
+        assertEquals("RECONNECT Alice room-42 tok-secret-99\n", ProtocolCodec.encodeCommand(rec));
+    }
+
+    @Test
+    @DisplayName("Should encode and decode Protocol v2 DEFENSE_STATE, PLAYER_STATE, and WELCOME events")
+    void shouldEncodeAndDecodeProtocolV2Events() throws ProtocolException {
+        // DEFENSE_STATE with card value
+        ServerEvent.ActionDefenseState ads1 = new ServerEvent.ActionDefenseState(CardValue.WILD_DRAW_FOUR, 8, "Charlie");
+        assertEquals(EventType.ACTION_DEFENSE_STATE, ads1.type());
+        String ads1Wire = ProtocolCodec.encodeEvent(ads1);
+        assertEquals("DEFENSE_STATE WILD_DRAW_FOUR 8 Charlie\n", ads1Wire);
+        ServerEvent decodedAds1 = ProtocolCodec.decodeEvent(ads1Wire);
+        assertEquals(ads1, decodedAds1);
+
+        // DEFENSE_STATE with NONE
+        ServerEvent.ActionDefenseState adsNone = new ServerEvent.ActionDefenseState(null, 0, "Alice");
+        String adsNoneWire = ProtocolCodec.encodeEvent(adsNone);
+        assertEquals("DEFENSE_STATE NONE 0 Alice\n", adsNoneWire);
+        assertEquals(adsNone, ProtocolCodec.decodeEvent(adsNoneWire));
+
+        // PLAYER_STATE with grace seconds
+        ServerEvent.PlayerState ps1 = new ServerEvent.PlayerState("Bob", "DISCONNECTED", 120);
+        assertEquals(EventType.PLAYER_STATE, ps1.type());
+        String ps1Wire = ProtocolCodec.encodeEvent(ps1);
+        assertEquals("PLAYER_STATE Bob DISCONNECTED 120\n", ps1Wire);
+        assertEquals(ps1, ProtocolCodec.decodeEvent(ps1Wire));
+
+        // PLAYER_STATE without grace seconds
+        ServerEvent.PlayerState ps2 = new ServerEvent.PlayerState("Bob", "RECONNECTED", 0);
+        String ps2Wire = ProtocolCodec.encodeEvent(ps2);
+        assertEquals("PLAYER_STATE Bob RECONNECTED\n", ps2Wire);
+        assertEquals(ps2, ProtocolCodec.decodeEvent(ps2Wire));
+
+        // WELCOME with reconnect token
+        ServerEvent.Welcome welcome = new ServerEvent.Welcome("p-101", "reconn-tok-77", "Welcome back!");
+        String welcomeWire = ProtocolCodec.encodeEvent(welcome);
+        assertEquals("WELCOME p-101 reconn-tok-77 Welcome back!\n", welcomeWire);
+        ServerEvent.Welcome decodedWelcome = (ServerEvent.Welcome) ProtocolCodec.decodeEvent(welcomeWire);
+        assertEquals("p-101", decodedWelcome.assignedPlayerId());
+        assertEquals("reconn-tok-77", decodedWelcome.reconnectToken());
+        assertEquals("Welcome back!", decodedWelcome.message());
+    }
+
+    @Test
+    @DisplayName("Should enforce bounded TCP frame reader limit of 8192 bytes and close socket")
+    void shouldEnforceBoundedTcpFrameReaderLimit() throws Exception {
+        try (java.net.ServerSocket serverSocket = new java.net.ServerSocket(0)) {
+            int port = serverSocket.getLocalPort();
+            pl.ultimo.server.net.ConnectionListener listener = new pl.ultimo.server.net.ConnectionListener() {
+                @Override
+                public void onCommandReceived(pl.ultimo.server.net.ClientSession session, ClientCommand command) {}
+                @Override
+                public void onSessionDisconnected(pl.ultimo.server.net.ClientSession session) {}
+            };
+
+            Thread serverThread = Thread.ofVirtual().start(() -> {
+                try (java.net.Socket accepted = serverSocket.accept()) {
+                    pl.ultimo.server.net.ClientSession session = new pl.ultimo.server.net.ClientSession("test-oom", accepted, listener, 5000);
+                    session.run();
+                } catch (Exception ignored) {}
+            });
+
+            try (java.net.Socket client = new java.net.Socket("127.0.0.1", port)) {
+                client.setSoTimeout(3000);
+                java.io.OutputStream out = client.getOutputStream();
+                byte[] oversized = "A".repeat(8193).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                out.write(oversized);
+                out.flush();
+
+                java.io.BufferedReader reader = new java.io.BufferedReader(
+                        new java.io.InputStreamReader(client.getInputStream(), java.nio.charset.StandardCharsets.UTF_8));
+                String response = reader.readLine();
+                assertEquals("ERROR FRAME_TOO_LONG: Frame length exceeds 8192 bytes", response);
+                assertNull(reader.readLine());
+            }
+            serverThread.join(2000);
+        }
+    }
+
+    @Test
+    @DisplayName("Should emit proactive PING on TCP idle timeout and survive when PONG is returned")
+    void shouldEmitProactivePingOnTcpIdleTimeoutAndAcceptPong() throws Exception {
+        try (java.net.ServerSocket serverSocket = new java.net.ServerSocket(0)) {
+            int port = serverSocket.getLocalPort();
+            pl.ultimo.server.net.ConnectionListener listener = new pl.ultimo.server.net.ConnectionListener() {
+                @Override
+                public void onCommandReceived(pl.ultimo.server.net.ClientSession session, ClientCommand command) {
+                    if (command instanceof ClientCommand.Ping) {
+                        session.sendEvent(new ServerEvent.Pong());
+                    }
+                }
+                @Override
+                public void onSessionDisconnected(pl.ultimo.server.net.ClientSession session) {}
+            };
+
+            Thread serverThread = Thread.ofVirtual().start(() -> {
+                try (java.net.Socket accepted = serverSocket.accept()) {
+                    // 120ms idle timeout -> 60ms SO_TIMEOUT check interval
+                    pl.ultimo.server.net.ClientSession session = new pl.ultimo.server.net.ClientSession("test-ping", accepted, listener, 120);
+                    session.run();
+                } catch (Exception ignored) {}
+            });
+
+            try (java.net.Socket client = new java.net.Socket("127.0.0.1", port)) {
+                client.setSoTimeout(3000);
+                java.io.OutputStream out = client.getOutputStream();
+                java.io.BufferedReader reader = new java.io.BufferedReader(
+                        new java.io.InputStreamReader(client.getInputStream(), java.nio.charset.StandardCharsets.UTF_8));
+
+                // Send initial command to enter handleTcpConnection loop
+                out.write("PING\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                out.flush();
+                assertEquals("PONG", reader.readLine());
+
+                // Wait for server idle timeout probe -> must be PING, not PONG
+                String probe = reader.readLine();
+                assertEquals("PING", probe);
+
+                // Reply with PONG and then QUIT cleanly
+                out.write("PONG\nQUIT\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                out.flush();
+
+                String quitAck = reader.readLine();
+                assertNotNull(quitAck);
+                assertTrue(quitAck.contains("QUIT_ACK"));
+            }
+            serverThread.join(2000);
+        }
+    }
 }
+

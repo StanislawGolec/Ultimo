@@ -415,16 +415,14 @@ public final class ProtocolCodec {
                     if (parts.length < 2) {
                         throw new ProtocolException("Malformed WELCOME event: " + line);
                     }
-                    String id = parts[1];
-                    String token = parts.length > 2 ? parts[2] : id;
+                    String[] wParts = line.split("\\s+", 4);
+                    String id = wParts[1];
+                    String token = wParts.length > 2 ? wParts[2] : id;
                     String message = "";
-                    if (parts.length > 3) {
-                        int tokenPos = line.indexOf(parts[2]);
-                        if (tokenPos != -1) {
-                            message = line.substring(tokenPos + parts[2].length()).trim();
-                        }
-                    } else if (parts.length == 3) {
-                        message = parts[2];
+                    if (wParts.length > 3) {
+                        message = wParts[3];
+                    } else if (wParts.length == 3) {
+                        message = wParts[2];
                     }
                     yield new ServerEvent.Welcome(id, token, message);
                 }
@@ -481,8 +479,9 @@ public final class ProtocolCodec {
                     if (parts.length < 2) {
                         throw new ProtocolException("Malformed CHAT_BROADCAST event: " + line);
                     }
-                    String sender = parts[1];
-                    String msg = parts.length > 2 ? line.substring(line.indexOf(parts[2])).trim() : "";
+                    String[] cParts = line.split("\\s+", 3);
+                    String sender = cParts[1];
+                    String msg = cParts.length > 2 ? cParts[2] : "";
                     yield new ServerEvent.ChatBroadcast(sender, msg);
                 }
                 case "GAME_OVER" -> {
