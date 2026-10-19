@@ -44,6 +44,7 @@ public class TerminalClientApp {
     private final List<Card> myHand = Collections.synchronizedList(new ArrayList<>());
     private final Map<String, Integer> opponentCardCounts = Collections.synchronizedMap(new LinkedHashMap<>());
     private final Set<String> disconnectedOpponents = ConcurrentHashMap.newKeySet();
+    private final Map<String, String> playerConnectionTags = new ConcurrentHashMap<>();
     private Card topCard;
     private CardColor activeColor;
     private String activePlayerName;
@@ -51,6 +52,7 @@ public class TerminalClientApp {
 
     private String roomCode;
     private volatile String currentHudAlert;
+    private volatile boolean defenseStateReceived;
 
     public TerminalClientApp(String host, int port, String username, boolean ansiEnabled) {
         this(host, port, username, null, ansiEnabled);
@@ -131,7 +133,7 @@ public class TerminalClientApp {
         }
     }
 
-    private void runInputLoop(Scanner scanner) {
+    void runInputLoop(Scanner scanner) {
         printHelp();
 
         while (isRunning.get() && scanner.hasNextLine()) {
@@ -142,6 +144,7 @@ public class TerminalClientApp {
 
             if (input.equalsIgnoreCase("q") || input.equalsIgnoreCase("quit") || input.equalsIgnoreCase("exit")) {
                 System.out.println("Opuszczanie gry...");
+                sendCommand("QUIT");
                 break;
             }
 
@@ -157,6 +160,17 @@ public class TerminalClientApp {
 
             if (input.equalsIgnoreCase("s") || input.equalsIgnoreCase("start")) {
                 sendCommand("START");
+                continue;
+            }
+
+            if (input.equalsIgnoreCase("bot") || input.equalsIgnoreCase("addbot") || input.equalsIgnoreCase("add_bot")) {
+                sendCommand("ADD_BOT");
+                continue;
+            }
+
+            if (input.toLowerCase().startsWith("bot ") || input.toLowerCase().startsWith("addbot ")) {
+                String diff = input.substring(input.indexOf(' ') + 1).trim().toUpperCase();
+                sendCommand(diff.isEmpty() ? "ADD_BOT" : "ADD_BOT " + diff);
                 continue;
             }
 
@@ -272,15 +286,7 @@ public class TerminalClientApp {
         try {
             String line;
             while (isRunning.get() && (line = reader.readLine()) != null) {
-                if (line.isBlank()) {
-                    continue;
-                }
-                try {
-                    ServerEvent event = ProtocolCodec.decodeEvent(line);
-                    handleEvent(event);
-                } catch (Exception e) {
-                    System.out.println("[Serwer]: " + line);
-                }
+                handleServerLine(line);
             }
         } catch (IOException e) {
             if (isRunning.get()) {
@@ -291,7 +297,24 @@ public class TerminalClientApp {
         }
     }
 
-    private void handleEvent(ServerEvent event) {
+    void handleServerLine(String line) {
+        if (line == null || line.isBlank()) {
+            return;
+        }
+        String trimmed = line.trim();
+        if ("PING".equalsIgnoreCase(trimmed)) {
+            sendCommand("PONG");
+            return;
+        }
+        try {
+            ServerEvent event = ProtocolCodec.decodeEvent(trimmed);
+            handleEvent(event);
+        } catch (Exception e) {
+            System.out.println("[Serwer]: " + line);
+        }
+    }
+
+    void handleEvent(ServerEvent event) {
         switch (event) {
             case ServerEvent.Welcome welcome -> {
                 System.out.println("\n*** " + welcome.message() + " ***");
@@ -303,9 +326,9 @@ public class TerminalClientApp {
                         + String.join(", ", roomStatus.playerNames()));
                 if (roomStatus.currentPlayers() < roomStatus.maxPlayers()) {
                     if (roomStatus.currentPlayers() >= 2) {
-                        System.out.println("Możesz wpisać 'start' (lub 's'), aby rozpocząć grę w " + roomStatus.currentPlayers() + " graczy, lub poczekać na kolejnych graczy.");
+                        System.out.println("Możesz wpisać 'start' (lub 's'), aby rozpocząć grę w " + roomStatus.currentPlayers() + " graczy, lub 'bot' aby dodać bota AI.");
                     } else {
-                        System.out.println("Oczekiwanie na dołączenie drugiego gracza...");
+                        System.out.println("Oczekiwanie na dołączenie drugiego gracza (lub wpisz 'bot' aby dodać bota AI)...");
                     }
                 }
             }
@@ -313,12 +336,14 @@ public class TerminalClientApp {
                 this.topCard = top.card();
                 this.activeColor = top.activeColor();
                 this.gameStarted = true;
-                if (topCard != null && topCard.value() == pl.ultimo.core.model.CardValue.DRAW_TWO) {
-                    currentHudAlert = "⚠️ PENALTY STACK: +2 CARDS! Play a Draw card to defend or click Draw to take penalty.";
-                } else if (topCard != null && topCard.value() == pl.ultimo.core.model.CardValue.WILD_DRAW_FOUR) {
-                    currentHudAlert = "⚠️ PENALTY STACK: +4 CARDS! Play a Draw card to defend or click Draw to take penalty.";
-                } else if (topCard != null && topCard.value() != pl.ultimo.core.model.CardValue.SKIP) {
-                    currentHudAlert = null;
+                if (!defenseStateReceived) {
+                    if (topCard != null && topCard.value() == pl.ultimo.core.model.CardValue.DRAW_TWO) {
+                        currentHudAlert = "⚠️ PENALTY STACK: +2 CARDS! Play a Draw card to defend or type 'd' to take penalty.";
+                    } else if (topCard != null && topCard.value() == pl.ultimo.core.model.CardValue.WILD_DRAW_FOUR) {
+                        currentHudAlert = "⚠️ PENALTY STACK: +4 CARDS! Play a Draw card to defend or type 'd' to take penalty.";
+                    } else if (topCard != null && topCard.value() != pl.ultimo.core.model.CardValue.SKIP) {
+                        currentHudAlert = null;
+                    }
                 }
                 printTableView();
             }
@@ -347,29 +372,10 @@ public class TerminalClientApp {
                 System.out.println("\n[-] BŁĄD RUCHU: " + err.errorMessage());
             }
             case ServerEvent.ChatBroadcast chat -> {
-                String msg = chat.message();
-                if ("GAME".equalsIgnoreCase(chat.sender())) {
-                    if (msg.contains("disconnected. They have 2 minutes to rejoin.")) {
-                        String name = msg.split(" ")[0];
-                        disconnectedOpponents.add(name);
-                    } else if (msg.contains("has reconnected!")) {
-                        String name = msg.split(" ")[0];
-                        disconnectedOpponents.remove(name);
-                    } else if (msg.contains("failed to reconnect") || msg.contains("was removed")) {
-                        String name = msg.split(" ")[0];
-                        disconnectedOpponents.remove(name);
-                        opponentCardCounts.remove(name);
-                    }
-                }
                 if (chat.message().contains("no playable moves") || chat.message().contains("auto-passed") || chat.message().contains("Turn passed")) {
                     System.out.println("\n[ℹ️ AUTO-PASS] " + chat.message());
                 } else {
                     System.out.println("\n[CZAT] " + chat.sender() + ": " + chat.message());
-                }
-                if (chat.message().contains("PENALTY STACK:")) {
-                    currentHudAlert = "⚠️ " + chat.message() + " - Play a Draw card to defend or click Draw to take penalty.";
-                } else if (chat.message().contains("SKIP DEFLECTED") || chat.message().contains("SKIP EFFECT")) {
-                    currentHudAlert = "🛡️ " + chat.message();
                 }
             }
             case ServerEvent.GameOver gameOver -> {
@@ -401,6 +407,8 @@ public class TerminalClientApp {
                 System.out.println("  Punktacja turnieju (do 500 pkt): " + roundOver.tournamentScores());
                 if (roundOver.isTournamentWon()) {
                     System.out.println("  *** TURNIEJ ZAKOŃCZONY! Mistrzem zostaje " + roundOver.roundWinner() + "! ***");
+                } else {
+                    System.out.println("  Następna runda rozpocznie się za 5 sekund...");
                 }
                 System.out.println("============================================================\n");
                 System.out.print(renderer.renderPodium(roundOver.roundWinner(), roundOver.tournamentScores()));
@@ -430,23 +438,40 @@ public class TerminalClientApp {
                 System.out.println("============================================================\n");
             }
             case ServerEvent.ActionDefenseState ads -> {
-                if (ads.defenseType() == pl.ultimo.core.model.CardValue.DRAW_TWO
-                        || ads.defenseType() == pl.ultimo.core.model.CardValue.WILD_DRAW_FOUR) {
-                    currentHudAlert = "⚠️ PENALTY STACK: +" + ads.accumulatedPenalty() + " CARDS! Target: " + ads.targetPlayer();
-                } else if (ads.defenseType() == pl.ultimo.core.model.CardValue.SKIP) {
-                    currentHudAlert = "🛡️ SKIP DEFLECTION PENDING -> Target: " + ads.targetPlayer();
-                } else {
-                    currentHudAlert = null;
+                defenseStateReceived = true;
+                currentHudAlert = renderer.renderDefenseBanner(ads);
+                if (currentHudAlert != null) {
+                    System.out.println("\n" + currentHudAlert);
+                }
+                if (gameStarted) {
+                    printTableView();
                 }
             }
             case ServerEvent.PlayerState ps -> {
+                String tag = renderer.renderPlayerStateTag(ps);
                 if ("DISCONNECTED".equalsIgnoreCase(ps.status())) {
                     disconnectedOpponents.add(ps.username());
+                    playerConnectionTags.put(ps.username(), tag);
+                    System.out.println("\n[STATUS] " + ps.username() + " " + tag);
+                } else if ("RECONNECTED".equalsIgnoreCase(ps.status()) || "CONNECTED".equalsIgnoreCase(ps.status())) {
+                    disconnectedOpponents.remove(ps.username());
+                    playerConnectionTags.put(ps.username(), tag);
+                    System.out.println("\n[STATUS] " + ps.username() + " " + tag);
                 } else {
                     disconnectedOpponents.remove(ps.username());
+                    playerConnectionTags.remove(ps.username());
+                    opponentCardCounts.remove(ps.username());
+                }
+                if (gameStarted) {
+                    printTableView();
                 }
             }
             case ServerEvent.Pong ignored -> {}
+            default -> {
+                if (event != null && "PING".equalsIgnoreCase(event.type().name())) {
+                    sendCommand("PONG");
+                }
+            }
         }
     }
 
@@ -455,7 +480,15 @@ public class TerminalClientApp {
             return;
         }
 
-        System.out.print("\n" + renderer.renderTable(topCard, activeColor, activePlayerName, username, opponentCardCounts, currentHudAlert, disconnectedOpponents));
+        System.out.print("\n" + renderer.renderTable(
+                topCard,
+                activeColor,
+                activePlayerName,
+                username,
+                opponentCardCounts,
+                currentHudAlert,
+                disconnectedOpponents,
+                playerConnectionTags));
         System.out.println("Twoje karty:");
         synchronized (myHand) {
             System.out.println(renderer.renderHand(myHand));
@@ -467,6 +500,9 @@ public class TerminalClientApp {
     }
 
     private void sendCommand(String commandLine) {
+        if (writer == null) {
+            return;
+        }
         try {
             writer.write(commandLine.endsWith("\n") ? commandLine : commandLine + "\n");
             writer.flush();
@@ -475,10 +511,27 @@ public class TerminalClientApp {
         }
     }
 
+    void setWriter(BufferedWriter writer) {
+        this.writer = writer;
+    }
+
+    public String getCurrentHudAlert() {
+        return currentHudAlert;
+    }
+
+    public Map<String, String> getPlayerConnectionTags() {
+        return Collections.unmodifiableMap(playerConnectionTags);
+    }
+
+    public Set<String> getDisconnectedOpponents() {
+        return Collections.unmodifiableSet(disconnectedOpponents);
+    }
+
     private void printHelp() {
         System.out.println("\n--- DOSTĘPNE POLECENIA ---");
         System.out.println("  [1, 2... / 1,2 / 1 2] - Zagranie karty lub komba kart o tej samej wartości (np. 1,3)");
         System.out.println("  s, start              - Rozpoczęcie meczu (gdy w pokoju jest min. 2 graczy)");
+        System.out.println("  bot, addbot           - Dodanie bota AI do pokoju (tylko Host w lobby)");
         System.out.println("  d, draw               - Dobranie 1 karty z talii (lub przyjęcie kary ze stosu)");
         System.out.println("  p, pass               - Spasowanie tury (dozwolone po dobraniu karty)");
         System.out.println("  u, ultimo             - Zgłoszenie ULTIMO (gdy masz 1 lub 2 karty przed ruchem)");

@@ -125,4 +125,42 @@ class WebClientAssetsTest {
         assertTrue(html.contains("viewport-fit=cover"), "Viewport meta must specify viewport-fit=cover for notch devices");
         assertTrue(html.contains("max-height: 500px"), "CSS must provide media query for mobile landscape orientations");
     }
+
+    @Test
+    @DisplayName("Web client must consume Protocol v2 DEFENSE_STATE and PLAYER_STATE events instead of chat scraping")
+    void webClientConsumesProtocolV2DefenseAndPlayerStateEvents() {
+        String html = WebClientAssets.INDEX_HTML;
+
+        assertTrue(html.contains("case 'DEFENSE_STATE':"), "JS must handle Protocol v2 DEFENSE_STATE wire event");
+        assertTrue(html.contains("case 'PLAYER_STATE':"), "JS must handle Protocol v2 PLAYER_STATE wire event");
+        assertTrue(html.contains("case 'PING':"), "JS must reply to PING with PONG");
+        assertFalse(html.contains("disconnected. They have 2 minutes to rejoin."),
+                "JS must not scrape chat broadcast strings for player disconnection");
+        assertFalse(html.contains("has reconnected!"),
+                "JS must not scrape chat broadcast strings for player reconnection");
+    }
+
+    @Test
+    @DisplayName("Web client must include real-time turn countdown timer progress bar, Add AI Bot button, and Round Intermission modal")
+    void webClientContainsTurnCountdownBotControlsAndRoundIntermissionModal() {
+        String html = WebClientAssets.INDEX_HTML;
+
+        // Turn countdown progress bar
+        assertTrue(html.contains("id=\"turnTimerContainer\""), "HTML must contain turnTimerContainer");
+        assertTrue(html.contains("id=\"turnTimerBar\""), "HTML must contain turnTimerBar");
+        assertTrue(html.contains("startTurnCountdown("), "JS must provide startTurnCountdown(timeoutMs) handler");
+
+        // Host one-click Add AI Bot button
+        assertTrue(html.contains("id=\"addBotBtn\""), "Lobby bar must include addBotBtn");
+        assertTrue(html.contains("Add AI Bot"), "Button label must include 'Add AI Bot'");
+        assertTrue(html.contains("addAiBot()"), "JS must provide addAiBot() handler");
+        assertTrue(html.contains("sendCommand('ADD_BOT')"), "addAiBot() must send ADD_BOT command");
+
+        // Round Intermission modal between tournament rounds
+        assertTrue(html.contains("id=\"roundIntermissionModal\""), "HTML must include roundIntermissionModal");
+        assertTrue(html.contains("id=\"intermissionTitle\""), "Modal must include intermissionTitle");
+        assertTrue(html.contains("Round 1 Over! Next round in 5s..."), "Modal must display round intermission countdown message");
+        assertTrue(html.contains("id=\"intermissionScoresList\""), "Modal must display cumulative tournament scores list");
+        assertTrue(html.contains("showRoundIntermissionModal("), "JS must invoke showRoundIntermissionModal on in-progress ROUND_OVER");
+    }
 }

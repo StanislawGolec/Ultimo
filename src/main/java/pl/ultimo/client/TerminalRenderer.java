@@ -3,7 +3,10 @@ package pl.ultimo.client;
 import pl.ultimo.core.model.Card;
 import pl.ultimo.core.model.CardColor;
 
+import pl.ultimo.protocol.ServerEvent;
+
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -132,6 +135,43 @@ public class TerminalRenderer {
     }
 
     /**
+     * Formats the Protocol v2 ActionDefenseState into a HUD alert banner.
+     */
+    public String renderDefenseBanner(ServerEvent.ActionDefenseState defenseState) {
+        if (defenseState == null || defenseState.defenseType() == null) {
+            return null;
+        }
+        return switch (defenseState.defenseType()) {
+            case DRAW_TWO, WILD_DRAW_FOUR -> {
+                if (defenseState.accumulatedPenalty() <= 0) {
+                    yield null;
+                }
+                yield "⚠️ PENALTY STACK: +" + defenseState.accumulatedPenalty()
+                        + " CARDS! Play a Draw card to defend or type 'd' to take penalty.";
+            }
+            case SKIP -> "🛡️ SKIP DEFLECTED to " + defenseState.targetPlayer() + "!";
+            default -> null;
+        };
+    }
+
+    /**
+     * Formats the Protocol v2 PlayerState into a real-time connection status tag.
+     */
+    public String renderPlayerStateTag(ServerEvent.PlayerState playerState) {
+        if (playerState == null || playerState.status() == null) {
+            return "";
+        }
+        if ("DISCONNECTED".equalsIgnoreCase(playerState.status())) {
+            int sec = playerState.graceSecondsRemaining() > 0 ? playerState.graceSecondsRemaining() : 120;
+            return "[DISCONNECTED - " + sec + "s grace]";
+        }
+        if ("RECONNECTED".equalsIgnoreCase(playerState.status()) || "CONNECTED".equalsIgnoreCase(playerState.status())) {
+            return "[RECONNECTED]";
+        }
+        return "";
+    }
+
+    /**
      * Formats the game table view: top card, active color, opponents, and turn status.
      */
     public String renderTable(
@@ -161,6 +201,39 @@ public class TerminalRenderer {
             Map<String, Integer> opponentCardCounts,
             String hudAlert,
             Set<String> disconnectedOpponents) {
+        return renderTable(topCard, activeColor, activePlayer, myUsername, opponentCardCounts, hudAlert, disconnectedOpponents, Collections.emptyMap());
+    }
+
+    public String renderTable(
+            Card topCard,
+            CardColor activeColor,
+            String activePlayer,
+            String myUsername,
+            Map<String, Integer> opponentCardCounts,
+            ServerEvent.ActionDefenseState defenseState,
+            Map<String, ServerEvent.PlayerState> playerStates) {
+        String hudAlert = renderDefenseBanner(defenseState);
+        Map<String, String> tags = new LinkedHashMap<>();
+        if (playerStates != null) {
+            playerStates.forEach((user, state) -> {
+                String tag = renderPlayerStateTag(state);
+                if (!tag.isEmpty()) {
+                    tags.put(user, tag);
+                }
+            });
+        }
+        return renderTable(topCard, activeColor, activePlayer, myUsername, opponentCardCounts, hudAlert, Collections.emptySet(), tags);
+    }
+
+    public String renderTable(
+            Card topCard,
+            CardColor activeColor,
+            String activePlayer,
+            String myUsername,
+            Map<String, Integer> opponentCardCounts,
+            String hudAlert,
+            Set<String> disconnectedOpponents,
+            Map<String, String> playerConnectionTags) {
 
         StringBuilder sb = new StringBuilder();
         sb.append("============================================================\n");
@@ -181,10 +254,26 @@ public class TerminalRenderer {
             sb.append("  Przeciwnicy:       ");
             opponentCardCounts.forEach((name, count) -> {
                 if (!name.equalsIgnoreCase(myUsername)) {
+                    String customTag = null;
+                    if (playerConnectionTags != null) {
+                        for (Map.Entry<String, String> entry : playerConnectionTags.entrySet()) {
+                            if (entry.getKey().equalsIgnoreCase(name)) {
+                                customTag = entry.getValue();
+                                break;
+                            }
+                        }
+                    }
                     boolean isDisc = disconnectedOpponents != null
                             && disconnectedOpponents.stream().anyMatch(d -> d.equalsIgnoreCase(name));
                     String discTag = "";
-                    if (isDisc) {
+                    if (customTag != null && !customTag.isBlank()) {
+                        if (ansiEnabled) {
+                            String color = customTag.contains("DISCONNECTED") ? FG_YELLOW : FG_GREEN;
+                            discTag = " " + color + BOLD + customTag + RESET;
+                        } else {
+                            discTag = " " + customTag;
+                        }
+                    } else if (isDisc) {
                         discTag = ansiEnabled
                                 ? (" " + FG_YELLOW + BOLD + "[DISCONNECTED - 2m grace]" + RESET)
                                 : " [DISCONNECTED - 2m grace]";

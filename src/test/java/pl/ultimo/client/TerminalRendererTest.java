@@ -143,4 +143,86 @@ class TerminalRendererTest {
         assertTrue(coloredTable.contains("\u001B[93m"),
                 "Colored table must include yellow ANSI code for disconnect warning tag");
     }
+
+    @Test
+    @DisplayName("Protocol v2 ActionDefenseState should format penalty stack and skip deflection HUD banners")
+    void protocolV2ActionDefenseStateFormatsBanners() {
+        TerminalRenderer renderer = TerminalRenderer.plain();
+
+        var drawStack = new pl.ultimo.protocol.ServerEvent.ActionDefenseState(CardValue.DRAW_TWO, 6, "Bob");
+        assertEquals(
+                "⚠️ PENALTY STACK: +6 CARDS! Play a Draw card to defend or type 'd' to take penalty.",
+                renderer.renderDefenseBanner(drawStack));
+
+        var skipDeflect = new pl.ultimo.protocol.ServerEvent.ActionDefenseState(CardValue.SKIP, 1, "Charlie");
+        assertEquals(
+                "🛡️ SKIP DEFLECTED to Charlie!",
+                renderer.renderDefenseBanner(skipDeflect));
+
+        var noneState = new pl.ultimo.protocol.ServerEvent.ActionDefenseState(null, 0, "-");
+        assertNull(renderer.renderDefenseBanner(noneState));
+    }
+
+    @Test
+    @DisplayName("Protocol v2 PlayerState should format real-time DISCONNECTED grace and RECONNECTED tags")
+    void protocolV2PlayerStateFormatsRealTimeTags() {
+        TerminalRenderer plain = TerminalRenderer.plain();
+
+        var discState = new pl.ultimo.protocol.ServerEvent.PlayerState("Bob", "DISCONNECTED", 95);
+        assertEquals("[DISCONNECTED - 95s grace]", plain.renderPlayerStateTag(discState));
+
+        var recState = new pl.ultimo.protocol.ServerEvent.PlayerState("Charlie", "RECONNECTED", 0);
+        assertEquals("[RECONNECTED]", plain.renderPlayerStateTag(recState));
+
+        Card topCard = new Card(CardColor.RED, CardValue.DRAW_TWO);
+        Map<String, Integer> opponents = new java.util.LinkedHashMap<>();
+        opponents.put("Bob", 4);
+        opponents.put("Charlie", 2);
+
+        var defenseState = new pl.ultimo.protocol.ServerEvent.ActionDefenseState(CardValue.DRAW_TWO, 4, "Bob");
+        Map<String, pl.ultimo.protocol.ServerEvent.PlayerState> playerStates = Map.of(
+                "Bob", discState,
+                "Charlie", recState
+        );
+
+        String table = plain.renderTable(topCard, CardColor.RED, "Bob", "Alice", opponents, defenseState, playerStates);
+        assertTrue(table.contains("⚠️ PENALTY STACK: +4 CARDS! Play a Draw card to defend or type 'd' to take penalty."));
+        assertTrue(table.contains("Bob [DISCONNECTED - 95s grace] (4 kart)"));
+        assertTrue(table.contains("Charlie [RECONNECTED] (2 kart)"));
+    }
+
+    @Test
+    @DisplayName("TerminalClientApp should handle PING heartbeat, Protocol v2 events, addbot, and graceful QUIT")
+    void terminalClientHandlesProtocolV2AndCommands() {
+        TerminalClientApp client = new TerminalClientApp("localhost", 8080, "Alice", false);
+        java.io.StringWriter out = new java.io.StringWriter();
+        client.setWriter(new java.io.BufferedWriter(out));
+
+        // 1. Server PING -> immediate PONG\n reply
+        client.handleServerLine("PING");
+        assertEquals("PONG\n", out.toString());
+
+        // 2. Protocol v2 DEFENSE_STATE and PLAYER_STATE
+        client.handleServerLine("DEFENSE_STATE WILD_DRAW_FOUR 8 Bob");
+        assertEquals(
+                "⚠️ PENALTY STACK: +8 CARDS! Play a Draw card to defend or type 'd' to take penalty.",
+                client.getCurrentHudAlert());
+
+        client.handleServerLine("DEFENSE_STATE SKIP 1 Charlie");
+        assertEquals("🛡️ SKIP DEFLECTED to Charlie!", client.getCurrentHudAlert());
+
+        client.handleServerLine("PLAYER_STATE Bob DISCONNECTED 110");
+        assertEquals("[DISCONNECTED - 110s grace]", client.getPlayerConnectionTags().get("Bob"));
+        assertTrue(client.getDisconnectedOpponents().contains("Bob"));
+
+        client.handleServerLine("PLAYER_STATE Bob RECONNECTED 0");
+        assertEquals("[RECONNECTED]", client.getPlayerConnectionTags().get("Bob"));
+        assertFalse(client.getDisconnectedOpponents().contains("Bob"));
+
+        // 3. Input commands: bot, addbot, and quit sending ADD_BOT and QUIT\n
+        out.getBuffer().setLength(0);
+        java.util.Scanner scanner = new java.util.Scanner("bot\naddbot\nq\n");
+        client.runInputLoop(scanner);
+        assertEquals("ADD_BOT\nADD_BOT\nQUIT\n", out.toString());
+    }
 }

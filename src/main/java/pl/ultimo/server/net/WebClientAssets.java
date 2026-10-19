@@ -18,6 +18,10 @@ public final class WebClientAssets {
     }
 
     public static String getHtmlPage() {
+        return getHtmlMarkup() + getHtmlScript();
+    }
+
+    private static String getHtmlMarkup() {
         return """
 <!DOCTYPE html>
 <html lang="en">
@@ -57,6 +61,8 @@ public final class WebClientAssets {
     .btn-pass { background: #475569; }
     .btn-pass:hover:not(:disabled) { background: #334155; }
     .btn-start { background: #16a34a; }
+    .btn-bot { background: #0d9488; color: white; }
+    .btn-bot:hover:not(:disabled) { background: #0f766e; }
     .btn-create { background: #8b5cf6; }
     .btn-create:hover:not(:disabled) { background: #7c3aed; }
     .btn-browse { background: #0284c7; }
@@ -97,6 +103,10 @@ public final class WebClientAssets {
     .deck-pile:hover { transform: scale(1.05); }
     .turn-banner { background: rgba(15, 23, 42, 0.9); border: 2px solid #38bdf8; border-radius: 9999px; padding: 6px 20px; font-weight: 700; text-align: center; margin: 8px auto; width: fit-content; font-size: clamp(0.85rem, 1vw, 1rem); }
     .turn-banner.my-turn { border-color: #22c55e; background: rgba(34, 197, 94, 0.25); animation: pulse 1.5s infinite; }
+    .turn-timer-container { width: clamp(200px, 50%, 420px); margin: 2px auto 8px auto; text-align: center; }
+    .turn-timer-track { width: 100%; height: 8px; background: rgba(15, 23, 42, 0.85); border: 1px solid #334155; border-radius: 9999px; overflow: hidden; }
+    .turn-timer-bar { height: 100%; width: 100%; background: linear-gradient(90deg, #22c55e, #eab308, #ef4444); transition: width 0.1s linear; border-radius: 9999px; }
+    .turn-timer-text { font-size: 0.72rem; color: #cbd5e1; font-weight: 700; display: block; margin-top: 2px; }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
     .hand-area { background: rgba(15, 23, 42, 0.6); border-radius: 12px; padding: clamp(8px, 1.2vh, 14px); }
     .hand-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 8px; }
@@ -160,6 +170,7 @@ public final class WebClientAssets {
       <button id="joinBtn">Quick Play</button>
       <button id="openCreateBtn" class="btn-create">Create Room</button>
       <button id="openBrowserBtn" class="btn-browse">Browse</button>
+      <button id="addBotBtn" class="btn-bot" style="display: none;" onclick="addAiBot()">🤖 Add AI Bot</button>
       <button id="startBtn" class="btn-start" style="display: none;">Start Match</button>
       <div id="roomChip" class="room-chip" style="display: none;">
         <span id="roomChipText">Room: -</span>
@@ -181,6 +192,12 @@ public final class WebClientAssets {
       <div id="actionHudBanner" class="action-hud-banner" style="display: none;"></div>
 
       <div class="turn-banner" id="turnBanner">Connect and click 'Quick Play' to start</div>
+      <div class="turn-timer-container" id="turnTimerContainer" style="display: none;">
+        <div class="turn-timer-track">
+          <div class="turn-timer-bar" id="turnTimerBar"></div>
+        </div>
+        <span class="turn-timer-text" id="turnTimerText"></span>
+      </div>
 
       <div class="center-table">
         <div class="pile-box">
@@ -300,6 +317,16 @@ public final class WebClientAssets {
     </div>
   </div>
 
+  <div class="modal-overlay" id="roundIntermissionModal">
+    <div class="modal" style="max-width: 500px; text-align: center;">
+      <div style="font-size: 2.6rem; margin-bottom: 6px;">⏳🏆</div>
+      <div class="modal-title" style="color: #38bdf8; font-size: 1.45rem;" id="intermissionTitle">Round 1 Over! Next round in 5s...</div>
+      <div id="intermissionWinnerInfo" style="color: #fef08a; font-weight: 700; margin-bottom: 12px;"></div>
+      <div id="intermissionScoresList" style="display: flex; flex-direction: column; gap: 8px; margin: 14px 0;"></div>
+      <button onclick="closeIntermissionModal()" style="background: #334155; width: 100%; font-size: 0.95rem; padding: 8px;">Dismiss</button>
+    </div>
+  </div>
+
   <div class="modal-overlay" id="podiumModal">
     <div class="modal" style="max-width: 520px; text-align: center;">
       <div style="font-size: 3rem; margin-bottom: 8px;">🥇🥈🥉</div>
@@ -310,7 +337,11 @@ public final class WebClientAssets {
   </div>
 
   <div id="toastContainer" class="toast-container"></div>
+""";
+    }
 
+    private static String getHtmlScript() {
+        return """
   <script>
     let ws = null;
     let myUsername = '';
@@ -330,8 +361,15 @@ public final class WebClientAssets {
     let isPlayerFinished = false;
     let hasDrawnThisTurn = false;
     let currentHandTokens = [];
+    let currentRoundNumber = 0;
+    let intermissionInterval = null;
+    let turnTimerInterval = null;
+    let turnTimeoutMs = 0;
+    let turnDeadlineMs = 0;
+    let defenseStateActive = false;
     const opponentCounts = new Map();
     const disconnectedOpponents = new Set();
+    const playerGraceSeconds = new Map();
 
     const joinBtn = document.getElementById('joinBtn');
     const roomCodeInput = document.getElementById('roomCodeInput');
@@ -342,6 +380,7 @@ public final class WebClientAssets {
     const openBrowserBtn = document.getElementById('openBrowserBtn');
     const confirmCreateRoomBtn = document.getElementById('confirmCreateRoomBtn');
     const refreshRoomsBtn = document.getElementById('refreshRoomsBtn');
+    const addBotBtn = document.getElementById('addBotBtn');
     const startBtn = document.getElementById('startBtn');
     const usernameInput = document.getElementById('usernameInput');
     const connStatus = document.getElementById('connStatus');
@@ -352,6 +391,9 @@ public final class WebClientAssets {
     const handCount = document.getElementById('handCount');
     const opponentsBar = document.getElementById('opponentsBar');
     const turnBanner = document.getElementById('turnBanner');
+    const turnTimerContainer = document.getElementById('turnTimerContainer');
+    const turnTimerBar = document.getElementById('turnTimerBar');
+    const turnTimerText = document.getElementById('turnTimerText');
     const actionHudBanner = document.getElementById('actionHudBanner');
     const discardCardContainer = document.getElementById('discardCardContainer');
     const playBtn = document.getElementById('playBtn');
@@ -365,6 +407,10 @@ public final class WebClientAssets {
     const roomBrowserModal = document.getElementById('roomBrowserModal');
     const spectatorModal = document.getElementById('spectatorModal');
     const spectatorTitle = document.getElementById('spectatorTitle');
+    const roundIntermissionModal = document.getElementById('roundIntermissionModal');
+    const intermissionTitle = document.getElementById('intermissionTitle');
+    const intermissionWinnerInfo = document.getElementById('intermissionWinnerInfo');
+    const intermissionScoresList = document.getElementById('intermissionScoresList');
     const podiumModal = document.getElementById('podiumModal');
     const podiumLeaderboard = document.getElementById('podiumLeaderboard');
     const toastContainer = document.getElementById('toastContainer');
@@ -433,6 +479,95 @@ public final class WebClientAssets {
       if (!target) return;
       sendCommand(`CATCH_ULTIMO ${target}`);
       logMessage(`Attempted to catch ${target} without ULTIMO!`, 'info');
+    }
+
+    function addAiBot() {
+      sendCommand('ADD_BOT');
+      logMessage('Requested to add an AI Bot to the room', 'info');
+    }
+
+    function startTurnCountdown(timeoutMs) {
+      stopTurnCountdown();
+      if (!timeoutMs || timeoutMs <= 0) return;
+      turnTimeoutMs = timeoutMs;
+      turnDeadlineMs = Date.now() + timeoutMs;
+      if (turnTimerContainer) turnTimerContainer.style.display = 'block';
+      if (turnTimerBar) turnTimerBar.style.width = '100%';
+      updateTurnCountdownTick();
+      turnTimerInterval = setInterval(updateTurnCountdownTick, 100);
+    }
+
+    function updateTurnCountdownTick() {
+      const remainingMs = Math.max(0, turnDeadlineMs - Date.now());
+      const pct = turnTimeoutMs > 0 ? Math.max(0, Math.min(100, (remainingMs / turnTimeoutMs) * 100)) : 0;
+      if (turnTimerBar) {
+        turnTimerBar.style.width = `${pct.toFixed(1)}%`;
+      }
+      if (turnTimerText) {
+        turnTimerText.textContent = `${Math.ceil(remainingMs / 1000)}s`;
+      }
+      if (remainingMs <= 0) {
+        stopTurnCountdown();
+      }
+    }
+
+    function stopTurnCountdown() {
+      if (turnTimerInterval) {
+        clearInterval(turnTimerInterval);
+        turnTimerInterval = null;
+      }
+      if (turnTimerContainer) {
+        turnTimerContainer.style.display = 'none';
+      }
+    }
+
+    function closeIntermissionModal() {
+      if (intermissionInterval) {
+        clearInterval(intermissionInterval);
+        intermissionInterval = null;
+      }
+      if (roundIntermissionModal) {
+        roundIntermissionModal.style.display = 'none';
+      }
+    }
+
+    function showRoundIntermissionModal(roundNum, winner, pts, scoresStr) {
+      closeIntermissionModal();
+      let secLeft = 5;
+      if (intermissionTitle) {
+        intermissionTitle.textContent = `Round ${roundNum} Over! Next round in ${secLeft}s...`;
+      }
+      if (intermissionWinnerInfo) {
+        intermissionWinnerInfo.textContent = `Round Winner: ${winner} (+${pts} pts)`;
+      }
+      if (intermissionScoresList) {
+        intermissionScoresList.innerHTML = '';
+        if (scoresStr && scoresStr !== '-') {
+          const scorePairs = scoresStr.split(',').map(s => {
+            const [name, score] = s.split(':');
+            return { name, score: parseInt(score, 10) || 0 };
+          }).filter(p => p.name);
+          scorePairs.sort((a, b) => b.score - a.score);
+          scorePairs.forEach((p, idx) => {
+            const row = document.createElement('div');
+            const rankClass = idx === 0 ? 'rank-1' : (idx === 1 ? 'rank-2' : (idx === 2 ? 'rank-3' : ''));
+            row.className = `podium-row ${rankClass}`;
+            row.innerHTML = `<span>#${idx + 1} ${p.name}</span><span>${p.score} pts</span>`;
+            intermissionScoresList.appendChild(row);
+          });
+        }
+      }
+      if (roundIntermissionModal) {
+        roundIntermissionModal.style.display = 'flex';
+      }
+      intermissionInterval = setInterval(() => {
+        secLeft--;
+        if (secLeft <= 0) {
+          closeIntermissionModal();
+        } else if (intermissionTitle) {
+          intermissionTitle.textContent = `Round ${roundNum} Over! Next round in ${secLeft}s...`;
+        }
+      }, 1000);
     }
 
     function copyActiveRoomCode() {
@@ -640,6 +775,10 @@ public final class WebClientAssets {
     function renderLobby(playerNames, curCount, maxCount) {
       if (gameStarted) return;
       const isOwner = (currentRoomOwner === myUsername);
+      if (addBotBtn) {
+        addBotBtn.style.display = (isOwner && curCount < maxCount) ? 'inline-block' : 'none';
+        addBotBtn.disabled = (curCount >= maxCount);
+      }
       turnBanner.className = 'turn-banner';
       if (curCount < 2) {
         turnBanner.textContent = `Lobby (${curCount}/${maxCount}): Waiting for players...`;
@@ -677,6 +816,10 @@ public final class WebClientAssets {
       const type = parts[0];
 
       switch(type) {
+        case 'PING':
+          sendCommand('PONG');
+          break;
+
         case 'WELCOME':
           logMessage(`Server: ${parts.slice(2).join(' ')}`, 'info');
           usernameInput.style.borderColor = '#334155';
@@ -703,6 +846,9 @@ public final class WebClientAssets {
           const rawPlayers = parts[4] || '';
           const playerNames = (rawPlayers && rawPlayers !== '-') ? rawPlayers.split(',') : [];
 
+          if (!currentRoomOwner && playerNames.length > 0) {
+            currentRoomOwner = playerNames[0];
+          }
           lastPlayerNames = playerNames;
           lastCurCount = curCount;
           lastMaxCount = maxCount;
@@ -730,6 +876,10 @@ public final class WebClientAssets {
         case 'HAND_UPDATE': {
           const cardTokens = parts.slice(1).filter(t => t.trim().length > 0);
           selectedIndices.clear();
+          if (cardTokens.length > 0 && isPlayerFinished) {
+            isPlayerFinished = false;
+            closeSpectatorModal();
+          }
           renderHand(cardTokens);
 
           if (gameStarted && cardTokens.length === 0 && !isPlayerFinished) {
@@ -748,6 +898,8 @@ public final class WebClientAssets {
         case 'TOP_CARD': {
           gameStarted = true;
           startBtn.style.display = 'none';
+          if (addBotBtn) addBotBtn.style.display = 'none';
+          closeIntermissionModal();
           const newTopCard = parts[1];
           if (newTopCard !== currentTopCard) {
             currentTopCard = newTopCard;
@@ -757,13 +909,15 @@ public final class WebClientAssets {
           discardCardContainer.innerHTML = '';
           discardCardContainer.appendChild(createCardElement(currentTopCard, currentActiveColor));
 
-          if (currentTopCard && (currentTopCard.includes('DRAW_TWO') || currentTopCard.includes('DRAW_FOUR'))) {
-            const count = currentTopCard.includes('FOUR') ? 4 : 2;
-            actionHudBanner.className = 'action-hud-banner stack';
-            actionHudBanner.textContent = `⚠️ PENALTY STACK: +${count} CARDS! Play a Draw card to defend or click Draw to take penalty.`;
-            actionHudBanner.style.display = 'block';
-          } else if (!actionHudBanner.className.includes('deflect')) {
-            actionHudBanner.style.display = 'none';
+          if (!defenseStateActive) {
+            if (currentTopCard && (currentTopCard.includes('DRAW_TWO') || currentTopCard.includes('DRAW_FOUR'))) {
+              const count = currentTopCard.includes('FOUR') ? 4 : 2;
+              actionHudBanner.className = 'action-hud-banner stack';
+              actionHudBanner.textContent = `⚠️ PENALTY STACK: +${count} CARDS! Play a Draw card to defend or click Draw to take penalty.`;
+              actionHudBanner.style.display = 'block';
+            } else if (!actionHudBanner.className.includes('deflect')) {
+              actionHudBanner.style.display = 'none';
+            }
           }
 
           updateTurnUI();
@@ -773,14 +927,65 @@ public final class WebClientAssets {
         case 'TURN_ANNOUNCED': {
           gameStarted = true;
           startBtn.style.display = 'none';
+          if (addBotBtn) addBotBtn.style.display = 'none';
           const newTurnPlayer = parts[1];
+          const timeoutMs = parts[2] ? parseInt(parts[2], 10) : 0;
           if (newTurnPlayer !== currentTurnPlayer) {
             currentTurnPlayer = newTurnPlayer;
             hasDrawnThisTurn = false;
             selectedIndices.clear();
           }
+          if (timeoutMs > 0) {
+            startTurnCountdown(timeoutMs);
+          } else {
+            stopTurnCountdown();
+          }
           updateTurnUI();
           renderOpponents();
+          break;
+        }
+
+        case 'DEFENSE_STATE': {
+          defenseStateActive = true;
+          const defType = (parts[1] || 'NONE').toUpperCase();
+          const penaltyCount = parseInt(parts[2], 10) || 0;
+          const targetPlayer = parts[3] || '';
+          if ((defType === 'DRAW_TWO' || defType === 'WILD_DRAW_FOUR') && penaltyCount > 0) {
+            actionHudBanner.className = 'action-hud-banner stack';
+            actionHudBanner.textContent = `⚠️ PENALTY STACK: +${penaltyCount} CARDS! Play a Draw card to defend or click Draw to take penalty.`;
+            actionHudBanner.style.display = 'block';
+          } else if (defType === 'SKIP') {
+            actionHudBanner.className = 'action-hud-banner deflect';
+            actionHudBanner.textContent = `🛡️ SKIP DEFLECTED! Shifted to ${targetPlayer}!`;
+            actionHudBanner.style.display = 'block';
+          } else {
+            actionHudBanner.className = 'action-hud-banner';
+            actionHudBanner.style.display = 'none';
+          }
+          break;
+        }
+
+        case 'PLAYER_STATE': {
+          const pName = parts[1];
+          const pStatus = (parts[2] || '').toUpperCase();
+          const graceSec = parseInt(parts[3], 10) || 120;
+          if (pStatus === 'DISCONNECTED') {
+            disconnectedOpponents.add(pName);
+            playerGraceSeconds.set(pName, graceSec);
+            renderOpponents();
+            showToast(`⚠️ ${pName} disconnected (${graceSec}s grace period).`, 'disconnected');
+          } else if (pStatus === 'RECONNECTED' || pStatus === 'CONNECTED') {
+            disconnectedOpponents.delete(pName);
+            playerGraceSeconds.delete(pName);
+            renderOpponents();
+            showToast(`✅ ${pName} reconnected!`, 'reconnect');
+          } else if (pStatus === 'REMOVED' || pStatus === 'EXPIRED' || pStatus === 'FORFEITED') {
+            disconnectedOpponents.delete(pName);
+            playerGraceSeconds.delete(pName);
+            opponentCounts.delete(pName);
+            renderOpponents();
+            showToast(`❌ ${pName} left the match (${pStatus}).`, 'disconnected');
+          }
           break;
         }
 
@@ -807,22 +1012,6 @@ public final class WebClientAssets {
           logMessage(`[${sender}]: ${msg}`, sender === 'GAME' ? 'win' : 'chat');
 
           if (sender === 'GAME') {
-            if (msg.includes('disconnected. They have 2 minutes to rejoin.')) {
-              const disconnectedName = msg.split(' ')[0];
-              disconnectedOpponents.add(disconnectedName);
-              renderOpponents();
-              showToast(`⚠️ ${disconnectedName} closed page / disconnected. 2m grace period active.`, 'disconnected');
-            } else if (msg.includes('has reconnected!')) {
-              const reconnectedName = msg.split(' ')[0];
-              disconnectedOpponents.delete(reconnectedName);
-              renderOpponents();
-              showToast(`✅ ${reconnectedName} reconnected!`, 'reconnect');
-            } else if (msg.includes('failed to reconnect') || msg.includes('was removed')) {
-              const removedName = msg.split(' ')[0];
-              disconnectedOpponents.delete(removedName);
-              opponentCounts.delete(removedName);
-              renderOpponents();
-            }
             if (msg.includes('Room Access Code:')) {
               activeAccessCode = msg.substring(msg.indexOf('Room Access Code:') + 17).trim();
               if (currentRoomId && currentRoomId !== '-') {
@@ -836,28 +1025,14 @@ public final class WebClientAssets {
               showToast(`ℹ️ ${msg}`, 'autopass');
               logMessage(`ℹ️ ${msg}`, 'autopass');
             }
-            if (msg.includes('PENALTY STACK:')) {
-              actionHudBanner.className = 'action-hud-banner stack';
-              actionHudBanner.textContent = `⚠️ PENALTY STACK: +4 CARDS! Play a Draw card to defend or click Draw to take penalty.`;
-              actionHudBanner.style.display = 'block';
-            } else if (msg.includes('SKIP DEFLECTED') || msg.includes('SKIP EFFECT:')) {
-              actionHudBanner.className = 'action-hud-banner deflect';
-              const shiftedIdx = msg.indexOf('Shifted to ');
-              const target = shiftedIdx > 0 ? msg.substring(shiftedIdx + 11).replace('!', '').trim() : 'next player';
-              actionHudBanner.textContent = `🛡️ SKIP DEFLECTED! Shifted to ${target}!`;
-              actionHudBanner.style.display = 'block';
-              setTimeout(() => {
-                if (actionHudBanner.className.includes('deflect')) {
-                  actionHudBanner.style.display = 'none';
-                }
-              }, 6000);
-            }
           }
           break;
         }
 
         case 'GAME_OVER': {
           const winner = parts[1];
+          stopTurnCountdown();
+          closeIntermissionModal();
           logMessage(`★ GAME OVER! Winner: ${winner} ★`, 'win');
           turnBanner.className = 'turn-banner my-turn';
           turnBanner.textContent = `★ GAME OVER! Winner: ${winner} ★`;
@@ -874,8 +1049,15 @@ public final class WebClientAssets {
           const pts = parts[2];
           const status = parts[3];
           const scoresToken = parts[4] || '';
-          logMessage(`Round Over! Winner: ${winner} (+${pts} pts)`, 'win');
-          renderPodiumUI(winner, scoresToken);
+          currentRoundNumber++;
+          stopTurnCountdown();
+          logMessage(`Round ${currentRoundNumber} Over! Winner: ${winner} (+${pts} pts)`, 'win');
+          if (status === 'WON') {
+            closeIntermissionModal();
+            renderPodiumUI(winner, scoresToken);
+          } else {
+            showRoundIntermissionModal(currentRoundNumber, winner, pts, scoresToken);
+          }
           break;
         }
 
@@ -885,7 +1067,9 @@ public final class WebClientAssets {
           if (errMsg.includes('kicked')) {
             alert('You have been kicked from the room by the host.');
             gameStarted = false;
+            stopTurnCountdown();
             startBtn.style.display = 'none';
+            if (addBotBtn) addBotBtn.style.display = 'none';
             opponentsBar.innerHTML = '';
             handCards.innerHTML = '';
             handCount.textContent = '0';
@@ -909,6 +1093,7 @@ public final class WebClientAssets {
 
         case 'SERVER_SHUTDOWN': {
           const drainSec = parts[1] || '5';
+          stopTurnCountdown();
           logMessage(`⚠️ SERVER SHUTDOWN: Server is shutting down in ${drainSec}s (graceful drain)!`, 'error');
           turnBanner.className = 'turn-banner';
           turnBanner.style.borderColor = '#ef4444';
@@ -917,6 +1102,7 @@ public final class WebClientAssets {
           drawBtn.disabled = true;
           passBtn.disabled = true;
           startBtn.style.display = 'none';
+          if (addBotBtn) addBotBtn.style.display = 'none';
           break;
         }
       }
@@ -1027,13 +1213,14 @@ public final class WebClientAssets {
         if (name !== myUsername) {
           const isTurn = name === currentTurnPlayer;
           const isDisc = disconnectedOpponents.has(name);
+          const graceSec = playerGraceSeconds.get(name) || 120;
           const div = document.createElement('div');
           div.className = `opponent-card ${isTurn ? 'turn' : ''} ${isDisc ? 'disconnected' : ''}`;
           let catchHtml = '';
           if (count === 1 && !isDisc) {
             catchHtml = `<button class="btn-catch-ultimo" onclick="catchUltimo('${name}')" title="Catch ${name} without saying ULTIMO!">🚨 CATCH ULTIMO!</button>`;
           }
-          let discBadgeHtml = isDisc ? '<span class="badge-disconnected" title="Player closed page / disconnected (2 min grace period)">⚠️ Offline (2m)</span>' : '';
+          let discBadgeHtml = isDisc ? `<span class="badge-disconnected" title="Player disconnected (${graceSec}s grace period)">⚠️ [DISCONNECTED - ${graceSec}s grace]</span>` : '';
           div.innerHTML = `<span class="opponent-name">${name}</span>${discBadgeHtml}<span class="opponent-badge">${count} 🂠</span>${catchHtml}`;
           opponentsBar.appendChild(div);
         }
