@@ -34,6 +34,14 @@ import java.util.concurrent.locks.ReentrantLock;
  */
 public class ClientSession implements Runnable, Closeable {
 
+    public static final int MAX_TCP_LINE_LENGTH = 8192;
+
+    public static class FrameTooLongException extends IOException {
+        public FrameTooLongException(String message) {
+            super(message);
+        }
+    }
+
     private final String sessionId;
     private final Socket socket;
     private final ConnectionListener listener;
@@ -42,6 +50,7 @@ public class ClientSession implements Runnable, Closeable {
 
     private final InputStream rawInputStream;
     private final OutputStream rawOutputStream;
+    private final ByteArrayOutputStream currentLineBuffer = new ByteArrayOutputStream(256);
 
     private final BlockingQueue<ServerEvent> outboundQueue = new LinkedBlockingQueue<>(1024);
     private volatile Thread outboundWriterThread;
