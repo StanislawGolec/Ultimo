@@ -209,7 +209,7 @@ class MultiAgentGameplayIntegrationTest {
 
         // Player 3 cannot defend -> sends PASS to accept skip
         p3.send("PASS");
-        assertNotNull(p4.awaitEvent(ev -> ev instanceof ServerEvent.TurnAnnounced ta && ta.activePlayerName().equals("Player_Four"), Duration.ofSeconds(5)));
+        assertNotNull(p3.awaitEvent(ev -> ev instanceof ServerEvent.ChatBroadcast cb && cb.message().contains("was skipped"), Duration.ofSeconds(5)));
         assertFalse(engine.isPendingSkipDeflection(), "Skip deflection should be consumed after Player 3 is skipped");
         assertEquals("Player_Four", engine.getTurnManager().getCurrentPlayer().getUsername(), "Turn moves to Player 4");
 
