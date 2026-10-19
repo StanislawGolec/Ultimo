@@ -181,6 +181,38 @@ class MultiAgentGameplayIntegrationTest {
         assertNotNull(victimAgent.awaitEvent(ev -> ev instanceof ServerEvent.ChatBroadcast cb && cb.message().contains("accepted penalty and drew 4 cards"), Duration.ofSeconds(5)));
         assertEquals(victimBefore + 4, victimPlayer.getHand().size(), "Player 3 should draw the accumulated 4 cards");
 
+        // 4b. Skip Deflection Verification (P1 plays Skip -> P2 deflects with Skip -> P3 is skipped):
+        Player p1Entity = engine.getPlayers().stream().filter(p -> p.getUsername().equals("Player_One")).findFirst().orElseThrow();
+        Player p2Entity = engine.getPlayers().stream().filter(p -> p.getUsername().equals("Player_Two")).findFirst().orElseThrow();
+        Player p3Entity = engine.getPlayers().stream().filter(p -> p.getUsername().equals("Player_Three")).findFirst().orElseThrow();
+
+        while (!engine.getTurnManager().getCurrentPlayer().equals(p1Entity)) {
+            engine.getTurnManager().advanceTurn();
+        }
+        engine.getDiscardPile().playCard(new Card(CardColor.RED, CardValue.FIVE), CardColor.RED);
+
+        // Player 1 plays RED SKIP
+        Card p1Skip = new Card(CardColor.RED, CardValue.SKIP);
+        p1Entity.getHand().addCard(p1Skip);
+        p1Entity.getHand().addCard(new Card(CardColor.BLUE, CardValue.EIGHT));
+        p1.send("PLAY RED_SKIP");
+        assertNotNull(p2.awaitEvent(ev -> ev instanceof ServerEvent.TurnAnnounced ta && ta.activePlayerName().equals("Player_Two"), Duration.ofSeconds(5)));
+        assertTrue(engine.isPendingSkipDeflection(), "Skip deflection must be pending towards Player 2");
+
+        // Player 2 defends with BLUE SKIP -> deflected to Player 3
+        Card p2Skip = new Card(CardColor.BLUE, CardValue.SKIP);
+        p2Entity.getHand().addCard(p2Skip);
+        p2Entity.getHand().addCard(new Card(CardColor.GREEN, CardValue.EIGHT));
+        p2.send("PLAY BLUE_SKIP");
+        assertNotNull(p3.awaitEvent(ev -> ev instanceof ServerEvent.TurnAnnounced ta && ta.activePlayerName().equals("Player_Three"), Duration.ofSeconds(5)));
+        assertEquals("Player_Three", engine.getSkipTarget().getUsername(), "Player 3 should now be the deflection target");
+
+        // Player 3 cannot defend -> sends PASS to accept skip
+        p3.send("PASS");
+        assertNotNull(p4.awaitEvent(ev -> ev instanceof ServerEvent.TurnAnnounced ta && ta.activePlayerName().equals("Player_Four"), Duration.ofSeconds(5)));
+        assertFalse(engine.isPendingSkipDeflection(), "Skip deflection should be consumed after Player 3 is skipped");
+        assertEquals("Player_Four", engine.getTurnManager().getCurrentPlayer().getUsername(), "Turn moves to Player 4");
+
         // 5. ULTIMO Declaration & 6-Card Penalty Catch verification:
         Player p4Entity = engine.getPlayers().stream()
                 .filter(p -> p.getUsername().equals("Player_Four"))
@@ -191,10 +223,8 @@ class MultiAgentGameplayIntegrationTest {
         p4Entity.getHand().addCard(activeColorCard);
         p4Entity.getHand().addCard(remainingCard);
 
-        // Ensure turn is on Player 4
-        while (!engine.getTurnManager().getCurrentPlayer().equals(p4Entity)) {
-            engine.getTurnManager().advanceTurn();
-        }
+        // Turn is already on Player 4 from the deflected skip
+        assertEquals(p4Entity, engine.getTurnManager().getCurrentPlayer(), "Turn must be on Player 4");
 
         // Player 4 plays penultimate card without shouting ULTIMO
         p4.send("PLAY " + activeColorCard.color() + "_" + activeColorCard.value());
