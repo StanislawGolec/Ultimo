@@ -223,4 +223,30 @@ class WebClientAssetsTest {
         assertTrue(html.contains("activeAccessCode || currentRoomId"),
                 "copyActiveRoomCode must copy accessCode for private rooms or currentRoomId for public rooms");
     }
+
+    @Test
+    @DisplayName("Web client must enforce strict bounded viewport layout and chat log retention capping")
+    void webClientEnforcesBoundedViewportAndChatPinning() {
+        String html = WebClientAssets.INDEX_HTML;
+
+        // Viewport height locking on desktop
+        assertTrue(html.contains("height: 100vh; max-height: 100vh; display: flex; flex-direction: column; overflow: hidden;"),
+                "Body must enforce strict 100vh viewport bounding without window scrolling");
+        assertTrue(html.contains("flex-shrink: 0;"), "Header and chat box must prevent vertical collapsing");
+
+        // Main grid and table flex sizing
+        assertTrue(html.contains(".table-container {"), "Table container must be styled");
+        assertTrue(html.contains(".sidebar {"), "Sidebar must be styled");
+        assertTrue(html.contains("min-height: 0;"), "Main grid and flex children must define min-height: 0 to prevent intrinsic overflow expansion");
+
+        // Log container internal scrolling and overscroll behavior
+        assertTrue(html.contains(".log-container {"), "Log container must be styled");
+        assertTrue(html.contains("overscroll-behavior: contain;"), "Log container must contain overscroll chaining");
+
+        // Rolling DOM retention capping
+        assertTrue(html.contains("logContainer.children.length > 200"),
+                "logMessage must cap chat DOM retention to prevent memory bloat");
+        assertTrue(html.contains("logContainer.removeChild(logContainer.firstChild);"),
+                "logMessage must evict oldest log nodes when cap exceeded");
+    }
 }

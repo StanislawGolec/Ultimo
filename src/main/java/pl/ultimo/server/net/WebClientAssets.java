@@ -43,8 +43,8 @@ public final class WebClientAssets {
       --yellow: #eab308;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
-    body { background: var(--bg); color: var(--text); min-height: 100vh; display: flex; flex-direction: column; overflow-x: hidden; }
-    header { background: var(--panel); padding: clamp(8px, 1.2vh, 16px) clamp(12px, 2vw, 32px); display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; flex-wrap: wrap; gap: 10px; }
+    body { background: var(--bg); color: var(--text); height: 100vh; max-height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+    header { background: var(--panel); padding: clamp(8px, 1.2vh, 16px) clamp(12px, 2vw, 32px); display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; flex-wrap: wrap; gap: 10px; flex-shrink: 0; }
     .brand { font-size: clamp(1.2rem, 2vw, 1.8rem); font-weight: 800; letter-spacing: 1px; color: #f59e0b; display: flex; align-items: center; gap: 8px; }
     .badge { font-size: 0.75rem; padding: 3px 8px; border-radius: 9999px; background: #3b82f6; color: white; text-transform: uppercase; font-weight: 700; }
     .lobby-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
@@ -83,9 +83,14 @@ public final class WebClientAssets {
     .room-table th, .room-table td { padding: 8px 12px; border-bottom: 1px solid #334155; }
     .room-table th { background: #0f172a; color: #94a3b8; }
     .modal select, .modal input[type="text"] { background: #0f172a; border: 1px solid #475569; color: white; padding: 8px 12px; border-radius: 6px; outline: none; }
-    main { flex: 1; display: grid; grid-template-columns: 1fr 340px; gap: 16px; padding: clamp(8px, 1.5vh, 20px); max-width: clamp(1000px, 92vw, 2560px); margin: 0 auto; width: 100%; }
-    @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
-    .table-container { background: radial-gradient(circle, var(--felt) 0%, #022c22 100%); border-radius: 16px; border: 3px solid #047857; box-shadow: inset 0 0 40px rgba(0,0,0,0.6); display: flex; flex-direction: column; justify-content: space-between; padding: clamp(10px, 1.8vh, 24px); min-height: clamp(340px, 62vh, 850px); position: relative; }
+    main { flex: 1; display: grid; grid-template-columns: 1fr 340px; gap: 16px; padding: clamp(8px, 1.2vh, 16px) clamp(12px, 2vw, 24px); max-width: clamp(1000px, 94vw, 2560px); margin: 0 auto; width: 100%; min-height: 0; height: 100%; overflow: hidden; box-sizing: border-box; }
+    @media (max-width: 900px) {
+      body { height: auto; max-height: none; min-height: 100vh; overflow-y: auto; }
+      main { grid-template-columns: 1fr; height: auto; overflow: visible; }
+      .table-container { height: auto; min-height: 520px; }
+      .sidebar { height: 380px; min-height: 380px; }
+    }
+    .table-container { background: radial-gradient(circle, var(--felt) 0%, #022c22 100%); border-radius: 16px; border: 3px solid #047857; box-shadow: inset 0 0 40px rgba(0,0,0,0.6); display: flex; flex-direction: column; justify-content: space-between; padding: clamp(10px, 1.5vh, 20px); height: 100%; min-height: 0; position: relative; overflow: hidden; }
     .opponents-bar { display: flex; justify-content: center; gap: 8px; min-height: 52px; max-height: 130px; overflow-y: auto; flex-wrap: wrap; padding: 4px; align-content: flex-start; }
     .opponent-card { background: rgba(15, 23, 42, 0.85); border: 1px solid #334155; border-radius: 8px; padding: 4px 10px; display: flex; flex-direction: row; align-items: center; gap: 8px; transition: all 0.15s ease; font-size: 0.85rem; }
     .opponent-card.turn { border-color: #facc15; background: rgba(250, 204, 21, 0.15); box-shadow: 0 0 12px rgba(250, 204, 21, 0.5); }
@@ -129,15 +134,15 @@ public final class WebClientAssets {
     .card-yellow { background: var(--yellow); color: black; }
     .card-wild { background: linear-gradient(135deg, var(--red) 25%, var(--blue) 25% 50%, var(--yellow) 50% 75%, var(--green) 75%); color: white; }
     .card-wild .card-center { background: #0f172a; color: white; }
-    .sidebar { background: var(--panel); border-radius: 16px; border: 1px solid #334155; display: flex; flex-direction: column; overflow: hidden; height: 100%; min-height: 480px; }
-    .sidebar-header { padding: 12px 16px; border-bottom: 1px solid #334155; font-weight: 700; display: flex; justify-content: space-between; align-items: center; }
-    .log-container { flex: 1; padding: 12px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; font-size: 0.85rem; }
+    .sidebar { background: var(--panel); border-radius: 16px; border: 1px solid #334155; display: flex; flex-direction: column; overflow: hidden; height: 100%; min-height: 0; }
+    .sidebar-header { padding: 12px 16px; border-bottom: 1px solid #334155; font-weight: 700; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
+    .log-container { flex: 1; padding: 12px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; font-size: 0.85rem; min-height: 0; overscroll-behavior: contain; }
     .log-item { padding: 6px 10px; border-radius: 6px; background: #0f172a; border-left: 3px solid #3b82f6; word-break: break-word; }
     .log-item.chat { border-left-color: #a855f7; }
     .log-item.error { border-left-color: #ef4444; color: #fca5a5; }
     .log-item.win { border-left-color: #eab308; background: #422006; font-weight: bold; }
     .log-item.autopass { border-left-color: #f59e0b; background: rgba(245, 158, 11, 0.15); color: #fde68a; font-weight: 600; }
-    .chat-box { padding: 10px; border-top: 1px solid #334155; display: flex; gap: 8px; }
+    .chat-box { padding: 10px; border-top: 1px solid #334155; display: flex; gap: 8px; flex-shrink: 0; }
     .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.75); display: none; align-items: center; justify-content: center; z-index: 100; backdrop-filter: blur(4px); }
     .modal { background: var(--panel); border: 1px solid #475569; border-radius: 12px; padding: 24px; max-width: 440px; width: 90%; text-align: center; box-shadow: 0 20px 40px rgba(0,0,0,0.6); }
     .modal-title { font-size: 1.25rem; font-weight: 800; margin-bottom: 16px; }
@@ -852,6 +857,9 @@ public final class WebClientAssets {
       div.className = `log-item ${type}`;
       div.textContent = text;
       logContainer.appendChild(div);
+      if (logContainer.children.length > 200) {
+        logContainer.removeChild(logContainer.firstChild);
+      }
       logContainer.scrollTop = logContainer.scrollHeight;
     }
 
