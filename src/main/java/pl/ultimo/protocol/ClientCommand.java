@@ -151,4 +151,26 @@ public sealed interface ClientCommand {
             return CommandType.RECONNECT;
         }
     }
+
+    record AddBot(String difficulty, String name) implements ClientCommand {
+        public AddBot() {
+            this("NORMAL", null);
+        }
+
+        public AddBot(String difficulty) {
+            this(difficulty, null);
+        }
+
+        @Override
+        public CommandType type() {
+            return CommandType.ADD_BOT;
+        }
+    }
+
+    record LeaveRoom() implements ClientCommand {
+        @Override
+        public CommandType type() {
+            return CommandType.LEAVE_ROOM;
+        }
+    }
 }

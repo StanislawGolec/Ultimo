@@ -25,5 +25,6 @@ public enum EventType {
     PLAYER_FINISHED,
     MATCH_STANDINGS,
     ACTION_DEFENSE_STATE,
-    PLAYER_STATE;
+    PLAYER_STATE,
+    ROOM_LEFT;
 }

@@ -19,5 +19,7 @@ public enum CommandType {
     KICK,
     TRANSFER_OWNERSHIP,
     QUIT,
-    RECONNECT;
+    RECONNECT,
+    ADD_BOT,
+    LEAVE_ROOM;
 }

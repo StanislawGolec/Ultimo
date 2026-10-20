@@ -216,10 +216,14 @@ The protocol is bidirectional, UTF-8 encoded, and line-delimited with `\n`.
 | `OPPONENT_UPDATE`| `OPPONENT_UPDATE <opponent_name> <count>` | Broadcasts opponent's updated card count |
 | `DEFENSE_STATE` | `DEFENSE_STATE <defense_type> <penalty_cards> <target_player>` | Broadcasts active penalty stack (+2/+4) or skip deflection state |
 | `PLAYER_STATE` | `PLAYER_STATE <username> <CONNECTED\|DISCONNECTED\|RECONNECTED> [grace_sec]` | Broadcasts connection lifecycle status and remaining disconnect grace time |
+| `PLAYER_FINISHED` | `PLAYER_FINISHED <player_name> <rank>` | Broadcasts player finishing and placement rank |
+| `MATCH_STANDINGS` | `MATCH_STANDINGS <rank:player>...` | Broadcasts final ordered placement standings for tournament round |
 | `DRAW_RESULT`| `DRAW_RESULT <card_token>` | Reports card drawn to drawer |
 | `ULTIMO_ANNOUNCED` | `ULTIMO_ANNOUNCED <player_name>` | Broadcasts Ultimo declaration |
 | `CHALLENGE_RESULT` | `CHALLENGE_RESULT <challenger> <target> <GUILTY\|INNOCENT> <draws>` | Challenge outcome |
+| `ROUND_OVER` | `ROUND_OVER <winner> <pts> <WON\|IN_PROGRESS> <scores>` | Concludes round and reports tournament points |
 | `CHAT_BROADCAST` | `CHAT_BROADCAST <sender> <message>` | Relays broadcast chat message or system alert |
+| `SERVER_SHUTDOWN`| `SERVER_SHUTDOWN <drain_seconds>` | Notifies clients of graceful server SIGTERM drain |
 | `GAME_OVER` | `GAME_OVER <winner_name>` | Declares match conclusion and winner name |
 | `ERROR` | `ERROR <message>` | Reports syntax, domain, or turn validation error |
 | `PONG` | `PONG` | Heartbeat response |
@@ -500,11 +504,11 @@ The repository includes a GitHub Actions matrix workflow ([`.github/workflows/ci
 
 ## Testing & Quality Assurance
 
-The codebase includes **309 automated unit, concurrency, domain, and end-to-end integration tests**:
+The codebase includes **311 automated unit, concurrency, domain, and end-to-end integration tests**:
 
 - **Official Ultimo Rules Extended Tests (30 tests):** Complete tournament scoring up to 500 points, penultimate card `ULTIMO` declarations, `CATCH_ULTIMO` penalties, and `CHALLENGE_WILD_FOUR` bluff legality checks.
 - **Autonomous Heuristic Bot Engine Tests (16 tests):** Tactical card valuation, penalty stack defense, dominant color frequency analysis, challenge heuristics, and virtual-thread bot game loops.
-- **Line-Delimited Protocol v2 & Keepalive Tests (15 tests):** 8KB bounded line reader DoS defense, `DEFENSE_STATE` and `PLAYER_STATE` wire codecs, cryptographic token reconnect, and idle TCP heartbeat keepalive survival exceeding 90 seconds.
+- **Line-Delimited Protocol v2 & Keepalive Tests (17 tests):** 8KB bounded line reader DoS defense, `DEFENSE_STATE` and `PLAYER_STATE` wire codecs, cryptographic token reconnect under simulated TCP RST, and idle TCP heartbeat keepalive survival exceeding 90 seconds.
 - **Chaos Resilience & Cross-Ecosystem Tests (6 tests):** Network jitter (150-200ms delay), abrupt TCP drops (RST emulation via `soLinger(true, 0)`), targeted room auto-reconnection, and polyglot TCP + WebSocket interoperability.
 - **RFC 6455 WebSocket Security & Fuzzing Tests (40 tests):** Mandatory client frame masking enforcement (Close 1002), 64KB DoS payload limits (Close 1009), control frame size limits, RSV bit validation, and random byte fuzzing stream resilience.
 - **Virtual Thread Concurrency & Pinning Tests (10 tests):** Virtual thread connection scalability, sealed `RoomEnvelope` mailbox processing, dedicated outbound serializer queues, idle connection watchdog reaper, and zero monitor locks in `pl.ultimo.server`.
@@ -518,7 +522,7 @@ java "-Djdk.tracePinnedThreads=full" -jar .tools/junit-platform-console-standalo
      execute --class-path "target/classes;target/test-classes" --scan-class-path
 ```
 
-All 309 tests execute cleanly with zero carrier pinning warnings.
+All 311 tests execute cleanly with zero carrier pinning warnings.
 
 ---
 

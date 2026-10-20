@@ -182,4 +182,11 @@ public sealed interface ServerEvent {
             return EventType.PLAYER_STATE;
         }
     }
+
+    record RoomLeft(String roomId) implements ServerEvent {
+        @Override
+        public EventType type() {
+            return EventType.ROOM_LEFT;
+        }
+    }
 }

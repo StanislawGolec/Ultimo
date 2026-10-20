@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.regex.Pattern;
@@ -226,6 +227,23 @@ public final class ProtocolCodec {
                     yield new ClientCommand.TransferOwnership(parts[1]);
                 }
                 case "QUIT" -> new ClientCommand.Quit();
+                case "ADD_BOT", "ADDBOT", "BOT" -> {
+                    String difficulty = "NORMAL";
+                    String name = null;
+                    if (parts.length >= 3) {
+                        difficulty = parts[1].trim().toUpperCase(Locale.ROOT);
+                        name = parts[2].trim();
+                    } else if (parts.length == 2) {
+                        String arg = parts[1].trim();
+                        if ("EASY".equalsIgnoreCase(arg) || "NORMAL".equalsIgnoreCase(arg) || "HARD".equalsIgnoreCase(arg)) {
+                            difficulty = arg.toUpperCase(Locale.ROOT);
+                        } else {
+                            name = arg;
+                        }
+                    }
+                    yield new ClientCommand.AddBot(difficulty, name);
+                }
+                case "LEAVE_ROOM", "LEAVE", "LEAVEROOM" -> new ClientCommand.LeaveRoom();
                 case "RECONNECT" -> {
                     if (parts.length < 4) {
                         throw new ProtocolException("RECONNECT requires username, roomId, and token: RECONNECT <username> <roomId> <token>");
@@ -300,6 +318,16 @@ public final class ProtocolCodec {
             case ClientCommand.Kick kick -> "KICK " + kick.targetPlayer() + "\n";
             case ClientCommand.TransferOwnership to -> "TRANSFER_OWNERSHIP " + to.targetPlayer() + "\n";
             case ClientCommand.Quit quit -> "QUIT\n";
+            case ClientCommand.AddBot ab -> {
+                if (ab.name() != null && !ab.name().isBlank()) {
+                    yield "ADD_BOT " + ab.difficulty() + " " + ab.name() + "\n";
+                } else if (ab.difficulty() != null && !"NORMAL".equalsIgnoreCase(ab.difficulty())) {
+                    yield "ADD_BOT " + ab.difficulty() + "\n";
+                } else {
+                    yield "ADD_BOT\n";
+                }
+            }
+            case ClientCommand.LeaveRoom lr -> "LEAVE_ROOM\n";
             case ClientCommand.Reconnect rec -> "RECONNECT " + rec.username() + " " + rec.roomId() + " " + rec.token() + "\n";
         };
     }
@@ -394,6 +422,7 @@ public final class ProtocolCodec {
                 }
                 yield "PLAYER_STATE " + ps.username() + " " + ps.status() + "\n";
             }
+            case ServerEvent.RoomLeft rl -> "ROOM_LEFT " + (rl.roomId() != null && !rl.roomId().isBlank() ? rl.roomId() : "-") + "\n";
         };
     }
 
@@ -611,6 +640,10 @@ public final class ProtocolCodec {
                     String status = parts[2].toUpperCase();
                     int grace = parts.length > 3 ? Integer.parseInt(parts[3]) : 0;
                     yield new ServerEvent.PlayerState(username, status, grace);
+                }
+                case "ROOM_LEFT" -> {
+                    String roomId = parts.length > 1 ? parts[1] : "-";
+                    yield new ServerEvent.RoomLeft(roomId);
                 }
                 default -> throw new ProtocolException("Unknown server event: " + eventName);
             };
