@@ -623,5 +623,48 @@ class ProtocolCodecTest {
             serverThread.join(2000);
         }
     }
+
+    @Test
+    @DisplayName("Should decode and encode ADD_BOT, LEAVE_ROOM commands and ROOM_LEFT event")
+    void shouldDecodeAndEncodeAddBotLeaveRoomAndRoomLeft() throws ProtocolException {
+        // ADD_BOT variations
+        ClientCommand cmd1 = ProtocolCodec.decodeCommand("ADD_BOT");
+        assertInstanceOf(ClientCommand.AddBot.class, cmd1);
+        ClientCommand.AddBot bot1 = (ClientCommand.AddBot) cmd1;
+        assertEquals("NORMAL", bot1.difficulty());
+        assertNull(bot1.name());
+        assertEquals("ADD_BOT\n", ProtocolCodec.encodeCommand(bot1));
+
+        ClientCommand cmd2 = ProtocolCodec.decodeCommand("ADDBOT HARD");
+        assertInstanceOf(ClientCommand.AddBot.class, cmd2);
+        ClientCommand.AddBot bot2 = (ClientCommand.AddBot) cmd2;
+        assertEquals("HARD", bot2.difficulty());
+        assertEquals("ADD_BOT HARD\n", ProtocolCodec.encodeCommand(bot2));
+
+        ClientCommand cmd3 = ProtocolCodec.decodeCommand("BOT EASY BotBob");
+        assertInstanceOf(ClientCommand.AddBot.class, cmd3);
+        ClientCommand.AddBot bot3 = (ClientCommand.AddBot) cmd3;
+        assertEquals("EASY", bot3.difficulty());
+        assertEquals("BotBob", bot3.name());
+        assertEquals("ADD_BOT EASY BotBob\n", ProtocolCodec.encodeCommand(bot3));
+
+        // LEAVE_ROOM variations
+        ClientCommand leave1 = ProtocolCodec.decodeCommand("LEAVE_ROOM");
+        assertInstanceOf(ClientCommand.LeaveRoom.class, leave1);
+        assertEquals("LEAVE_ROOM\n", ProtocolCodec.encodeCommand(leave1));
+
+        ClientCommand leave2 = ProtocolCodec.decodeCommand("LEAVE");
+        assertInstanceOf(ClientCommand.LeaveRoom.class, leave2);
+
+        ClientCommand leave3 = ProtocolCodec.decodeCommand("LEAVEROOM");
+        assertInstanceOf(ClientCommand.LeaveRoom.class, leave3);
+
+        // ROOM_LEFT event
+        ServerEvent event = ProtocolCodec.decodeEvent("ROOM_LEFT room-42");
+        assertInstanceOf(ServerEvent.RoomLeft.class, event);
+        ServerEvent.RoomLeft rl = (ServerEvent.RoomLeft) event;
+        assertEquals("room-42", rl.roomId());
+        assertEquals("ROOM_LEFT room-42\n", ProtocolCodec.encodeEvent(rl));
+    }
 }
 

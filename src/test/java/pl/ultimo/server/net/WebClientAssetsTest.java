@@ -189,4 +189,20 @@ class WebClientAssetsTest {
         assertTrue(html.contains("passBtn.disabled = false;"),
                 "updateTurnUI must enable passBtn during active defense");
     }
+
+    @Test
+    @DisplayName("Web client must contain Leave Room button, confirmation handler, and handle ROOM_LEFT event")
+    void webClientContainsLeaveRoomControlsAndEventHandling() {
+        String html = WebClientAssets.INDEX_HTML;
+
+        // Leave Room button and style
+        assertTrue(html.contains("id=\"leaveRoomBtn\""), "HTML must contain leaveRoomBtn");
+        assertTrue(html.contains(".btn-leave"), "CSS must style .btn-leave");
+        assertTrue(html.contains("leaveRoom()"), "JS must provide leaveRoom() handler");
+        assertTrue(html.contains("sendCommand('LEAVE_ROOM')"), "leaveRoom() must send LEAVE_ROOM command");
+
+        // Event handler for ROOM_LEFT
+        assertTrue(html.contains("case 'ROOM_LEFT':"), "JS must handle ROOM_LEFT server event");
+        assertTrue(html.contains("Left room. Join another room or quick play!"), "UI must inform user when room is left");
+    }
 }

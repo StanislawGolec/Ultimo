@@ -1297,4 +1297,115 @@ class GameRoomTest {
 
         room.stop();
     }
+
+    @Test
+    @DisplayName("Host can add bot via ADD_BOT wire command and non-host is rejected")
+    void shouldAddBotViaWireCommandWhenCallerIsHost() throws Exception {
+        GameRoom room = new GameRoom("room-wire-bot", 4);
+        executor.submit(room);
+
+        TestClient alice = createTestClient("s-1", "Alice");
+        TestClient bob = createTestClient("s-2", "Bob");
+
+        room.addPlayer(alice.session, "Alice");
+        assertEquals("Alice", room.getOwnerUsername());
+
+        // Alice (host) adds bot via wire command
+        room.enqueueCommand(alice.session, new ClientCommand.AddBot("NORMAL", null));
+        Thread.sleep(100);
+
+        assertEquals(2, room.getPlayerCount());
+        assertTrue(room.getPlayerNames().contains("Bot1"));
+        assertTrue(room.isBot("Bot1"));
+
+        // Bob joins as non-host
+        room.addPlayer(bob.session, "Bob");
+        Thread.sleep(50);
+        bob.drainEvents();
+
+        // Bob attempts to add bot -> rejected
+        room.enqueueCommand(bob.session, new ClientCommand.AddBot("HARD", "IllegalBot"));
+        Thread.sleep(80);
+
+        List<ServerEvent> bobEvents = bob.drainEvents();
+        assertTrue(bobEvents.stream().anyMatch(e -> e instanceof ServerEvent.ErrorEvent err
+                && err.errorMessage().contains("Only room owner can perform this action")));
+
+        room.stop();
+    }
+
+    @Test
+    @DisplayName("Host departure transfers ownership to next player and sends ROOM_LEFT to departing player")
+    void shouldTransferHostToNextPlayerWhenHostLeavesRoom() throws Exception {
+        GameRoom room = new GameRoom("room-leave-host", 4);
+        executor.submit(room);
+
+        TestClient alice = createTestClient("s-1", "Alice");
+        TestClient bob = createTestClient("s-2", "Bob");
+        TestClient charlie = createTestClient("s-3", "Charlie");
+
+        room.addPlayer(alice.session, "Alice");
+        room.addPlayer(bob.session, "Bob");
+        room.addPlayer(charlie.session, "Charlie");
+        assertEquals("Alice", room.getOwnerUsername());
+        Thread.sleep(50);
+        alice.drainEvents();
+        bob.drainEvents();
+        charlie.drainEvents();
+
+        // Alice (host) voluntarily leaves the room
+        room.enqueueCommand(alice.session, new ClientCommand.LeaveRoom());
+        Thread.sleep(100);
+
+        List<ServerEvent> aliceEvents = alice.drainEvents();
+        List<ServerEvent> bobEvents = bob.drainEvents();
+
+        // Alice receives RoomLeft confirmation
+        assertTrue(aliceEvents.stream().anyMatch(e -> e instanceof ServerEvent.RoomLeft rl
+                && rl.roomId().equals("room-leave-host")));
+
+        // Bob and Charlie receive RoomOwnerChanged to Bob
+        assertEquals("Bob", room.getOwnerUsername());
+        assertTrue(bobEvents.stream().anyMatch(e -> e instanceof ServerEvent.RoomOwnerChanged roc
+                && roc.newOwner().equals("Bob")));
+
+        assertFalse(room.getPlayerNames().contains("Alice"));
+        assertEquals(2, room.getPlayerCount());
+
+        room.stop();
+    }
+
+    @Test
+    @DisplayName("Mid-game voluntary departure removes player and awards forfeit victory if one player remains")
+    void shouldAllowMidGameLeaveAndAdvanceGame() throws Exception {
+        GameRoom room = new GameRoom("room-leave-midgame", 2);
+        executor.submit(room);
+
+        TestClient alice = createTestClient("s-1", "Alice");
+        TestClient bob = createTestClient("s-2", "Bob");
+
+        room.addPlayer(alice.session, "Alice");
+        room.addPlayer(bob.session, "Bob");
+        assertEquals(RoomState.IN_PROGRESS, room.getState());
+        Thread.sleep(50);
+        alice.drainEvents();
+        bob.drainEvents();
+
+        // Alice leaves mid-game
+        room.enqueueCommand(alice.session, new ClientCommand.LeaveRoom());
+        Thread.sleep(100);
+
+        List<ServerEvent> aliceEvents = alice.drainEvents();
+        List<ServerEvent> bobEvents = bob.drainEvents();
+
+        // Alice receives RoomLeft
+        assertTrue(aliceEvents.stream().anyMatch(e -> e instanceof ServerEvent.RoomLeft rl
+                && rl.roomId().equals("room-leave-midgame")));
+
+        // Bob receives GameOver winning by forfeit
+        assertTrue(bobEvents.stream().anyMatch(e -> e instanceof ServerEvent.GameOver go
+                && go.winnerName().equals("Bob")));
+
+        room.stop();
+    }
 }

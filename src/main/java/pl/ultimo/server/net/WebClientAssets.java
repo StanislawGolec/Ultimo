@@ -67,6 +67,8 @@ public final class WebClientAssets {
     .btn-create:hover:not(:disabled) { background: #7c3aed; }
     .btn-browse { background: #0284c7; }
     .btn-browse:hover:not(:disabled) { background: #0369a1; }
+    .btn-leave { background: #e11d48; color: white; border: none; padding: 6px 12px; border-radius: 6px; font-weight: 700; cursor: pointer; transition: background 0.15s; font-size: 0.82rem; }
+    .btn-leave:hover:not(:disabled) { background: #be123c; }
     .btn-kick { background: #ef4444; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; margin-left: 6px; cursor: pointer; border: none; }
     .btn-kick:hover { background: #dc2626; }
     .btn-promote { background: #eab308; color: black; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; margin-left: 4px; cursor: pointer; border: none; font-weight: bold; }
@@ -176,6 +178,7 @@ public final class WebClientAssets {
         <span id="roomChipText">Room: -</span>
         <button id="copyCodeBtn" class="btn-copy" style="display: none;" onclick="copyActiveRoomCode()" title="Copy Room Code">📋 Copy Code</button>
       </div>
+      <button id="leaveRoomBtn" class="btn-leave" style="display: none;" onclick="leaveRoom()">🚪 Leave Room</button>
       <span id="connStatus" style="font-size: 0.85rem; color: #94a3b8;">Disconnected</span>
     </div>
   </header>
@@ -385,6 +388,7 @@ public final class WebClientAssets {
     const refreshRoomsBtn = document.getElementById('refreshRoomsBtn');
     const addBotBtn = document.getElementById('addBotBtn');
     const startBtn = document.getElementById('startBtn');
+    const leaveRoomBtn = document.getElementById('leaveRoomBtn');
     const usernameInput = document.getElementById('usernameInput');
     const connStatus = document.getElementById('connStatus');
     const logContainer = document.getElementById('logContainer');
@@ -487,6 +491,13 @@ public final class WebClientAssets {
     function addAiBot() {
       sendCommand('ADD_BOT');
       logMessage('Requested to add an AI Bot to the room', 'info');
+    }
+
+    function leaveRoom() {
+      if (!currentRoomId) return;
+      if (confirm('Are you sure you want to leave this room?')) {
+        sendCommand('LEAVE_ROOM');
+      }
     }
 
     function startTurnCountdown(timeoutMs) {
@@ -777,6 +788,7 @@ public final class WebClientAssets {
 
     function renderLobby(playerNames, curCount, maxCount) {
       if (gameStarted) return;
+      if (leaveRoomBtn && currentRoomId) leaveRoomBtn.style.display = 'inline-block';
       const isOwner = (currentRoomOwner === myUsername);
       if (addBotBtn) {
         addBotBtn.style.display = (isOwner && curCount < maxCount) ? 'inline-block' : 'none';
@@ -858,6 +870,7 @@ public final class WebClientAssets {
 
           if (roomId && roomId !== '-' && roomId !== 'null') {
             currentRoomId = roomId;
+            if (leaveRoomBtn) leaveRoomBtn.style.display = 'inline-block';
             roomInfo.style.display = 'inline';
             let label = `Room: ${roomId} (${curCount}/${maxCount})`;
             if (activeAccessCode) {
@@ -873,6 +886,51 @@ public final class WebClientAssets {
           logMessage(`Room ${roomId}: ${playerNames.join(', ')} joined`, 'info');
 
           renderLobby(playerNames, curCount, maxCount);
+          break;
+        }
+
+        case 'ROOM_LEFT': {
+          const leftRoomId = parts[1] || currentRoomId;
+          logMessage(`You left room ${leftRoomId}`, 'info');
+          currentRoomId = null;
+          currentRoomOwner = null;
+          activeAccessCode = '';
+          gameStarted = false;
+          isPlayerFinished = false;
+          defenseStateActive = false;
+          currentDefenseType = null;
+          currentDefensePenalty = 0;
+          currentDefenseTarget = null;
+          if (actionHudBanner) {
+            actionHudBanner.className = 'action-hud-banner';
+            actionHudBanner.style.display = 'none';
+          }
+          stopTurnCountdown();
+          closeIntermissionModal();
+          closeSpectatorModal();
+          closePodiumModal();
+          startBtn.style.display = 'none';
+          if (addBotBtn) addBotBtn.style.display = 'none';
+          if (leaveRoomBtn) leaveRoomBtn.style.display = 'none';
+          if (copyCodeBtn) copyCodeBtn.style.display = 'none';
+          if (shoutUltimoBtn) shoutUltimoBtn.style.display = 'none';
+          if (playBtn) playBtn.style.display = 'none';
+          opponentsBar.innerHTML = '';
+          handCards.innerHTML = '';
+          handCount.textContent = '0';
+          roomInfo.style.display = 'none';
+          roomChip.style.display = 'none';
+          turnBanner.className = 'turn-banner';
+          turnBanner.textContent = 'Left room. Join another room or quick play!';
+          discardCardContainer.innerHTML = '';
+          opponentCounts.clear();
+          disconnectedOpponents.clear();
+          playerGraceSeconds.clear();
+          drawBtn.disabled = true;
+          passBtn.disabled = true;
+          joinBtn.disabled = false;
+          usernameInput.disabled = false;
+          if (roomCodeInput) roomCodeInput.disabled = false;
           break;
         }
 
@@ -1099,6 +1157,8 @@ public final class WebClientAssets {
           logMessage(`Error: ${errMsg}`, 'error');
           if (errMsg.includes('kicked')) {
             alert('You have been kicked from the room by the host.');
+            currentRoomId = null;
+            currentRoomOwner = null;
             gameStarted = false;
             defenseStateActive = false;
             currentDefenseType = null;
@@ -1111,6 +1171,8 @@ public final class WebClientAssets {
             stopTurnCountdown();
             startBtn.style.display = 'none';
             if (addBotBtn) addBotBtn.style.display = 'none';
+            if (leaveRoomBtn) leaveRoomBtn.style.display = 'none';
+            if (copyCodeBtn) copyCodeBtn.style.display = 'none';
             opponentsBar.innerHTML = '';
             handCards.innerHTML = '';
             handCount.textContent = '0';
@@ -1135,6 +1197,7 @@ public final class WebClientAssets {
         case 'SERVER_SHUTDOWN': {
           const drainSec = parts[1] || '5';
           stopTurnCountdown();
+          if (leaveRoomBtn) leaveRoomBtn.style.display = 'none';
           logMessage(`⚠️ SERVER SHUTDOWN: Server is shutting down in ${drainSec}s (graceful drain)!`, 'error');
           turnBanner.className = 'turn-banner';
           turnBanner.style.borderColor = '#ef4444';

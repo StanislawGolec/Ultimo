@@ -174,6 +174,11 @@ public class TerminalClientApp {
                 continue;
             }
 
+            if (input.equalsIgnoreCase("leave") || input.equalsIgnoreCase("l")) {
+                sendCommand("LEAVE_ROOM");
+                continue;
+            }
+
             if (input.equalsIgnoreCase("d") || input.equalsIgnoreCase("draw")) {
                 sendCommand("DRAW");
                 continue;
@@ -416,6 +421,20 @@ public class TerminalClientApp {
             case ServerEvent.RoomOwnerChanged roc -> {
                 System.out.println("\n[LOBBY] Właściciel pokoju (Host): " + roc.newOwner());
             }
+            case ServerEvent.RoomLeft rl -> {
+                System.out.println("\n[LOBBY] Opuszczono pokój " + rl.roomId() + ". Powrót do menu głównego.");
+                this.gameStarted = false;
+                this.topCard = null;
+                this.activeColor = null;
+                this.activePlayerName = null;
+                this.currentHudAlert = null;
+                synchronized (myHand) {
+                    myHand.clear();
+                }
+                opponentCardCounts.clear();
+                disconnectedOpponents.clear();
+                playerConnectionTags.clear();
+            }
             case ServerEvent.RoomList roomList -> {
                 System.out.println("\n[POKOJE PUBLICZNE]");
                 if (roomList.rooms().isEmpty()) {
@@ -532,6 +551,7 @@ public class TerminalClientApp {
         System.out.println("  [1, 2... / 1,2 / 1 2] - Zagranie karty lub komba kart o tej samej wartości (np. 1,3)");
         System.out.println("  s, start              - Rozpoczęcie meczu (gdy w pokoju jest min. 2 graczy)");
         System.out.println("  bot, addbot           - Dodanie bota AI do pokoju (tylko Host w lobby)");
+        System.out.println("  leave, l              - Opuszczenie obecnego pokoju");
         System.out.println("  d, draw               - Dobranie 1 karty z talii (lub przyjęcie kary ze stosu)");
         System.out.println("  p, pass               - Spasowanie tury (dozwolone po dobraniu karty)");
         System.out.println("  u, ultimo             - Zgłoszenie ULTIMO (gdy masz 1 lub 2 karty przed ruchem)");

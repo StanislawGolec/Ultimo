@@ -2,7 +2,7 @@
 
 [![Java Version](https://img.shields.io/badge/Java-21%20LTS-orange.svg)](https://openjdk.org/projects/jdk/21/)
 [![Virtual Threads](https://img.shields.io/badge/Concurrency-Virtual%20Threads%20%28Loom%29-blue.svg)](https://openjdk.org/jeps/444)
-[![Tests](https://img.shields.io/badge/Tests-311%2F311%20Passing%20%28100%25%29-brightgreen.svg)](https://junit.org/junit5/)
+[![Tests](https://img.shields.io/badge/Tests-316%2F316%20Passing%20%28100%25%29-brightgreen.svg)](https://junit.org/junit5/)
 [![WebSockets](https://img.shields.io/badge/WebSockets-RFC%206455%20Pure%20Java-9cf.svg)](#web-client--browser-gameplay)
 [![Dependencies](https://img.shields.io/badge/Runtime%20Dependencies-0%20%28Pure%20Java%20StdLib%29-success.svg)](#architectural-highlights)
 [![Docker](https://img.shields.io/badge/Docker-Multi--stage%20Alpine-2496ED.svg)](https://www.docker.com/)
@@ -201,6 +201,8 @@ The protocol is bidirectional, UTF-8 encoded, and line-delimited with `\n`.
 | `PING` | _(none)_ | Heartbeat probe | `PING` |
 | `RECONNECT` | `<username> <room_id> <token>` | Reclaims seat and private hand snapshot within 120s grace period | `RECONNECT Alice room-1 9f8a7c2b...` |
 | `QUIT` | _(none)_ | Gracefully leaves room, closes session, and disconnects | `QUIT` |
+| `ADD_BOT` | `[difficulty] [name]` | Enrolls an autonomous heuristic bot into the room (Host only) | `ADD_BOT`<br/>`ADD_BOT HARD BotMaster` |
+| `LEAVE_ROOM` | _(none)_ | Voluntarily leaves room; automatically transfers host to next player | `LEAVE_ROOM` |
 
 ### Server Events
 
@@ -208,6 +210,7 @@ The protocol is bidirectional, UTF-8 encoded, and line-delimited with `\n`.
 | :--- | :--- | :--- |
 | `WELCOME` | `WELCOME <session_id> <reconnect_token> <message>` | Acknowledges connection and provides cryptographic reconnect credentials |
 | `ROOM_STATUS`| `ROOM_STATUS <roomId> <current> <max> <p1,p2...>` | Broadcasts lobby status and connected players |
+| `ROOM_LEFT` | `ROOM_LEFT <room_id>` | Acknowledges player voluntary departure from room and returns to lobby |
 | `ROOM_LIST` | `ROOM_LIST <count> [rooms...]` | Reports available public rooms |
 | `ROOM_OWNER_CHANGED` | `ROOM_OWNER_CHANGED <new_owner>` | Broadcasts host transfer |
 | `TOP_CARD` | `TOP_CARD <card_token> <active_color>` | Updates active discard card and table color |

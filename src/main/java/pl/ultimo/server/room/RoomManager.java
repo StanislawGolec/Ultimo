@@ -266,6 +266,24 @@ public class RoomManager {
     }
 
     /**
+     * Handles voluntary player departure from their current room.
+     */
+    public void leaveRoom(ClientSession session) {
+        if (session == null) {
+            return;
+        }
+        GameRoom room = sessionRoomMap.get(session.getSessionId());
+        if (room != null) {
+            room.handleLeave(session);
+            if (room.getState() == RoomState.FINISHED || room.getPlayerCount() == 0 || room.getConnectedSessionCount() == 0) {
+                activeRooms.remove(room.getRoomId());
+                sessionRoomMap.entrySet().removeIf(entry -> entry.getValue().getRoomId().equals(room.getRoomId()));
+                room.stop();
+            }
+        }
+    }
+
+    /**
      * Handles player disconnect, notifying the corresponding room via {@link RoomEnvelope.DisconnectEnvelope}
      * and cleaning up empty rooms.
      */

@@ -684,6 +684,8 @@ public class GameRoom implements Runnable {
 
             switch (command) {
                 case ClientCommand.Start start -> handleStart(session);
+                case ClientCommand.AddBot addBot -> handleAddBot(session, addBot);
+                case ClientCommand.LeaveRoom leave -> handleLeaveInternal(session);
                 case ClientCommand.Kick kick -> handleKick(session, kick);
                 case ClientCommand.TransferOwnership to -> handleTransferOwnership(session, to);
                 case ClientCommand.Play play -> handlePlay(session, player, play);
@@ -730,6 +732,129 @@ public class GameRoom implements Runnable {
         }
 
         startGameInternal();
+    }
+
+    private void handleAddBot(ClientSession session, ClientCommand.AddBot addBot) {
+        Player caller = sessionPlayerMap.get(session.getSessionId());
+        if (caller == null || ownerUsername == null || !caller.getUsername().equalsIgnoreCase(ownerUsername)) {
+            session.sendEvent(new ServerEvent.ErrorEvent("Only room owner can perform this action"));
+            return;
+        }
+
+        if (state != RoomState.WAITING_FOR_PLAYERS) {
+            session.sendEvent(new ServerEvent.ErrorEvent("Cannot add bot: match is already in progress"));
+            return;
+        }
+
+        if (getPlayerCount() >= maxPlayers) {
+            session.sendEvent(new ServerEvent.ErrorEvent("Cannot add bot: room is full (" + maxPlayers + " players)"));
+            return;
+        }
+
+        String difficulty = addBot.difficulty() != null ? addBot.difficulty().toUpperCase(Locale.ROOT) : "NORMAL";
+        String botName = addBot.name();
+        if (botName == null || botName.isBlank()) {
+            int botNum = 1;
+            while (hasPlayer("Bot" + botNum)) {
+                botNum++;
+            }
+            botName = "Bot" + botNum;
+        }
+
+        boolean added = handleAddBotInternal(botName, difficulty);
+        if (added) {
+            broadcast(new ServerEvent.ChatBroadcast("GAME", caller.getUsername() + " added AI bot " + botName + " (" + difficulty + ") to the room."));
+        } else {
+            session.sendEvent(new ServerEvent.ErrorEvent("Failed to add bot: name taken or room capacity reached"));
+        }
+    }
+
+    public void handleLeave(ClientSession session) {
+        if (session == null) return;
+        if (Thread.currentThread() == actorThread || !actorLoopActive.get()) {
+            handleLeaveInternal(session);
+            return;
+        }
+        enqueueCommand(session, new ClientCommand.LeaveRoom());
+    }
+
+    private void handleLeaveInternal(ClientSession session) {
+        Player leavingPlayer = sessionPlayerMap.get(session.getSessionId());
+        if (leavingPlayer == null) {
+            session.sendEvent(new ServerEvent.ErrorEvent("Not currently in room"));
+            return;
+        }
+
+        String leavingUsername = leavingPlayer.getUsername();
+        boolean wasOwner = ownerUsername != null && leavingUsername.equalsIgnoreCase(ownerUsername);
+        String nextOwner = null;
+
+        // 1. Unmap session from room
+        sessions.remove(session);
+        sessionPlayerMap.remove(session.getSessionId());
+        String key = leavingUsername.toLowerCase(Locale.ROOT);
+        playerReconnectTokens.remove(key);
+        disconnectedPlayers.remove(key);
+        consecutiveAfkTurns.remove(key);
+
+        // 2. Notify RoomManager that session left this room
+        if (onPlayerLeave != null) {
+            try {
+                onPlayerLeave.accept(session);
+            } catch (Exception ignored) {}
+        }
+
+        // 3. Send acknowledgment to the leaving player
+        session.sendEvent(new ServerEvent.RoomLeft(roomId));
+
+        // 4. Handle room state specific departure logic
+        if (state == RoomState.WAITING_FOR_PLAYERS) {
+            players.remove(leavingPlayer);
+
+            if (wasOwner) {
+                Player nextOwnerPlayer = players.stream()
+                        .filter(p -> !isBot(p.getUsername()))
+                        .findFirst()
+                        .orElse(null);
+                if (nextOwnerPlayer == null && !players.isEmpty()) {
+                    nextOwnerPlayer = players.getFirst();
+                }
+                if (nextOwnerPlayer != null) {
+                    this.ownerUsername = nextOwnerPlayer.getUsername();
+                    nextOwner = this.ownerUsername;
+                } else {
+                    this.ownerUsername = null;
+                }
+            }
+
+            if (nextOwner != null) {
+                broadcast(new ServerEvent.RoomOwnerChanged(nextOwner));
+                broadcast(new ServerEvent.ChatBroadcast("GAME", "Host left. Ownership transferred to " + nextOwner));
+            }
+
+            broadcast(new ServerEvent.ChatBroadcast("GAME", leavingUsername + " left the room."));
+            broadcast(new ServerEvent.RoomStatus(roomId, players.size(), maxPlayers, getConnectedPlayerNames()));
+
+            if (players.isEmpty() || getHumanPlayerCount() == 0) {
+                stop();
+            }
+        } else if (state == RoomState.IN_PROGRESS || state == RoomState.ROUND_INTERMISSION) {
+            removePlayerFromMatch(leavingPlayer, leavingUsername + " left the match.", false);
+        } else {
+            players.remove(leavingPlayer);
+            if (players.isEmpty() || getHumanPlayerCount() == 0) {
+                stop();
+            }
+        }
+    }
+
+    public boolean isBot(String username) {
+        if (username == null) return false;
+        return botSessions.stream().anyMatch(b -> b.getUsername().equalsIgnoreCase(username));
+    }
+
+    public long getHumanPlayerCount() {
+        return players.stream().filter(p -> !isBot(p.getUsername())).count();
     }
 
     private void handleKick(ClientSession session, ClientCommand.Kick kick) {
@@ -1384,9 +1509,15 @@ public class GameRoom implements Runnable {
         boolean wasOwner = ownerUsername != null && player.getUsername().equalsIgnoreCase(ownerUsername);
         if (wasOwner) {
             Player nextActive = players.stream()
-                    .filter(p -> !isDisconnected(p.getUsername()))
+                    .filter(p -> !isDisconnected(p.getUsername()) && !isBot(p.getUsername()))
                     .findFirst()
                     .orElse(null);
+            if (nextActive == null) {
+                nextActive = players.stream()
+                        .filter(p -> !isDisconnected(p.getUsername()))
+                        .findFirst()
+                        .orElse(null);
+            }
             if (nextActive != null) {
                 this.ownerUsername = nextActive.getUsername();
                 nextOwner = this.ownerUsername;
@@ -1420,7 +1551,7 @@ public class GameRoom implements Runnable {
             broadcast(new ServerEvent.GameOver(winner.getUsername()));
             broadcast(new ServerEvent.ChatBroadcast("GAME", winner.getUsername() + " wins by forfeit!"));
             stop();
-        } else if (remainingCount == 0) {
+        } else if (remainingCount == 0 || getHumanPlayerCount() == 0) {
             stop();
         } else {
             this.turnStartedTimestamp = System.currentTimeMillis();
