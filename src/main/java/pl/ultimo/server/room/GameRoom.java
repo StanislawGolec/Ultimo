@@ -1284,7 +1284,8 @@ public class GameRoom implements Runnable {
             boolean wasOwner = ownerUsername != null && leavingPlayer.getUsername().equalsIgnoreCase(ownerUsername);
             if (wasOwner) {
                 if (!players.isEmpty()) {
-                    this.ownerUsername = players.getFirst().getUsername();
+                    Player nextHuman = players.stream().filter(p -> !isBot(p.getUsername())).findFirst().orElse(null);
+                    this.ownerUsername = (nextHuman != null ? nextHuman : players.getFirst()).getUsername();
                     nextOwner = this.ownerUsername;
                 } else {
                     this.ownerUsername = null;
@@ -1305,7 +1306,8 @@ public class GameRoom implements Runnable {
 
                 boolean wasOwner = ownerUsername != null && leavingPlayer.getUsername().equalsIgnoreCase(ownerUsername);
                 if (wasOwner) {
-                    Player nextActive = players.stream()
+                    Player nextActive = players.stream().filter(p -> !isDisconnected(p.getUsername()) && !isBot(p.getUsername())).findFirst().orElse(null);
+                    if (nextActive == null) nextActive = players.stream()
                             .filter(p -> !isDisconnected(p.getUsername()))
                             .findFirst()
                             .orElse(null);

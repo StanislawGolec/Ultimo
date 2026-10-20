@@ -172,6 +172,7 @@ public final class WebClientAssets {
       <button id="joinBtn">Quick Play</button>
       <button id="openCreateBtn" class="btn-create">Create Room</button>
       <button id="openBrowserBtn" class="btn-browse">Browse</button>
+      <select id="botDifficultySelect" style="display: none; padding: 5px 8px; font-size: 0.8rem; background: #0f172a; color: #f8fafc; border: 1px solid #475569; border-radius: 6px; cursor: pointer;"><option value="NORMAL" selected>Bot: Normal</option><option value="EASY">Bot: Easy</option><option value="HARD">Bot: Hard</option></select>
       <button id="addBotBtn" class="btn-bot" style="display: none;" onclick="addAiBot()">🤖 Add AI Bot</button>
       <button id="startBtn" class="btn-start" style="display: none;">Start Match</button>
       <div id="roomChip" class="room-chip" style="display: none;">
@@ -387,6 +388,7 @@ public final class WebClientAssets {
     const confirmCreateRoomBtn = document.getElementById('confirmCreateRoomBtn');
     const refreshRoomsBtn = document.getElementById('refreshRoomsBtn');
     const addBotBtn = document.getElementById('addBotBtn');
+    const botDifficultySelect = document.getElementById('botDifficultySelect');
     const startBtn = document.getElementById('startBtn');
     const leaveRoomBtn = document.getElementById('leaveRoomBtn');
     const usernameInput = document.getElementById('usernameInput');
@@ -489,7 +491,8 @@ public final class WebClientAssets {
     }
 
     function addAiBot() {
-      sendCommand('ADD_BOT');
+      const diff = botDifficultySelect ? botDifficultySelect.value : 'NORMAL';
+      sendCommand('ADD_BOT ' + diff);
       logMessage('Requested to add an AI Bot to the room', 'info');
     }
 
@@ -793,6 +796,7 @@ public final class WebClientAssets {
       if (addBotBtn) {
         addBotBtn.style.display = (isOwner && curCount < maxCount) ? 'inline-block' : 'none';
         addBotBtn.disabled = (curCount >= maxCount);
+        if (botDifficultySelect) { botDifficultySelect.style.display = (isOwner && curCount < maxCount) ? 'inline-block' : 'none'; botDifficultySelect.disabled = (curCount >= maxCount); }
       }
       turnBanner.className = 'turn-banner';
       if (curCount < 2) {
@@ -911,6 +915,7 @@ public final class WebClientAssets {
           closePodiumModal();
           startBtn.style.display = 'none';
           if (addBotBtn) addBotBtn.style.display = 'none';
+          if (botDifficultySelect) botDifficultySelect.style.display = 'none';
           if (leaveRoomBtn) leaveRoomBtn.style.display = 'none';
           if (copyCodeBtn) copyCodeBtn.style.display = 'none';
           if (shoutUltimoBtn) shoutUltimoBtn.style.display = 'none';
@@ -960,6 +965,7 @@ public final class WebClientAssets {
           gameStarted = true;
           startBtn.style.display = 'none';
           if (addBotBtn) addBotBtn.style.display = 'none';
+          if (botDifficultySelect) botDifficultySelect.style.display = 'none';
           closeIntermissionModal();
           const newTopCard = parts[1];
           if (newTopCard !== currentTopCard) {
@@ -983,6 +989,7 @@ public final class WebClientAssets {
           gameStarted = true;
           startBtn.style.display = 'none';
           if (addBotBtn) addBotBtn.style.display = 'none';
+          if (botDifficultySelect) botDifficultySelect.style.display = 'none';
           const newTurnPlayer = parts[1];
           const timeoutMs = parts[2] ? parseInt(parts[2], 10) : 0;
           if (newTurnPlayer !== currentTurnPlayer) {
@@ -1171,6 +1178,7 @@ public final class WebClientAssets {
             stopTurnCountdown();
             startBtn.style.display = 'none';
             if (addBotBtn) addBotBtn.style.display = 'none';
+          if (botDifficultySelect) botDifficultySelect.style.display = 'none';
             if (leaveRoomBtn) leaveRoomBtn.style.display = 'none';
             if (copyCodeBtn) copyCodeBtn.style.display = 'none';
             opponentsBar.innerHTML = '';
@@ -1207,6 +1215,7 @@ public final class WebClientAssets {
           passBtn.disabled = true;
           startBtn.style.display = 'none';
           if (addBotBtn) addBotBtn.style.display = 'none';
+          if (botDifficultySelect) botDifficultySelect.style.display = 'none';
           break;
         }
       }

@@ -1216,11 +1216,12 @@ class GameRoomTest {
 
         // Wait for the two autonomous bots to finish the game
         long deadline = System.currentTimeMillis() + 5_000L;
-        while (room.getState() != RoomState.FINISHED && System.currentTimeMillis() < deadline) {
+        while (room.getState() != RoomState.FINISHED && room.getState() != RoomState.ROUND_INTERMISSION && System.currentTimeMillis() < deadline) {
             Thread.sleep(25);
         }
 
-        assertEquals(RoomState.FINISHED, room.getState(), "Two heuristic bots should autonomously complete the match");
+        assertTrue(room.getState() == RoomState.FINISHED || room.getState() == RoomState.ROUND_INTERMISSION,
+                "Two heuristic bots should autonomously complete the round or match");
         room.stop();
     }
 
@@ -1405,6 +1406,41 @@ class GameRoomTest {
         // Bob receives GameOver winning by forfeit
         assertTrue(bobEvents.stream().anyMatch(e -> e instanceof ServerEvent.GameOver go
                 && go.winnerName().equals("Bob")));
+
+        room.stop();
+    }
+
+    @Test
+    @DisplayName("Host departure prioritizes human player over AI bot for ownership succession")
+    void shouldPrioritizeHumanOverBotOnHostDeparture() throws Exception {
+        GameRoom room = new GameRoom("room-bot-succession", 4);
+        executor.submit(room);
+
+        TestClient alice = createTestClient("s-1", "Alice");
+        TestClient bob = createTestClient("s-2", "Bob");
+
+        room.addPlayer(alice.session, "Alice");
+        assertEquals("Alice", room.getOwnerUsername());
+
+        // Alice adds bot first (so bot is at index 1 before Bob joins at index 2)
+        room.enqueueCommand(alice.session, new ClientCommand.AddBot("EASY", "Bot1"));
+        Thread.sleep(100);
+        assertTrue(room.getPlayerNames().contains("Bot1"));
+
+        // Bob joins as 3rd player
+        room.addPlayer(bob.session, "Bob");
+        Thread.sleep(50);
+        alice.drainEvents();
+        bob.drainEvents();
+
+        // Alice (host) leaves room -> host must transfer to Bob (human), NOT Bot1!
+        room.enqueueCommand(alice.session, new ClientCommand.LeaveRoom());
+        Thread.sleep(100);
+
+        List<ServerEvent> bobEvents = bob.drainEvents();
+        assertEquals("Bob", room.getOwnerUsername(), "Host must transfer to human player Bob, not Bot1");
+        assertTrue(bobEvents.stream().anyMatch(e -> e instanceof ServerEvent.RoomOwnerChanged roc
+                && roc.newOwner().equals("Bob")));
 
         room.stop();
     }

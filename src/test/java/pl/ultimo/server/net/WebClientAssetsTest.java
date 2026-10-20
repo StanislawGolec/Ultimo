@@ -154,7 +154,8 @@ class WebClientAssetsTest {
         assertTrue(html.contains("id=\"addBotBtn\""), "Lobby bar must include addBotBtn");
         assertTrue(html.contains("Add AI Bot"), "Button label must include 'Add AI Bot'");
         assertTrue(html.contains("addAiBot()"), "JS must provide addAiBot() handler");
-        assertTrue(html.contains("sendCommand('ADD_BOT')"), "addAiBot() must send ADD_BOT command");
+        assertTrue(html.contains("id=\"botDifficultySelect\""), "Lobby bar must include botDifficultySelect");
+        assertTrue(html.contains("sendCommand('ADD_BOT"), "addAiBot() must send ADD_BOT command");
 
         // Round Intermission modal between tournament rounds
         assertTrue(html.contains("id=\"roundIntermissionModal\""), "HTML must include roundIntermissionModal");

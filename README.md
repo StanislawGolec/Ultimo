@@ -2,7 +2,7 @@
 
 [![Java Version](https://img.shields.io/badge/Java-21%20LTS-orange.svg)](https://openjdk.org/projects/jdk/21/)
 [![Virtual Threads](https://img.shields.io/badge/Concurrency-Virtual%20Threads%20%28Loom%29-blue.svg)](https://openjdk.org/jeps/444)
-[![Tests](https://img.shields.io/badge/Tests-316%2F316%20Passing%20%28100%25%29-brightgreen.svg)](https://junit.org/junit5/)
+[![Tests](https://img.shields.io/badge/Tests-317%2F317%20Passing%20%28100%25%29-brightgreen.svg)](https://junit.org/junit5/)
 [![WebSockets](https://img.shields.io/badge/WebSockets-RFC%206455%20Pure%20Java-9cf.svg)](#web-client--browser-gameplay)
 [![Dependencies](https://img.shields.io/badge/Runtime%20Dependencies-0%20%28Pure%20Java%20StdLib%29-success.svg)](#architectural-highlights)
 [![Docker](https://img.shields.io/badge/Docker-Multi--stage%20Alpine-2496ED.svg)](https://www.docker.com/)
