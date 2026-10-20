@@ -171,4 +171,52 @@ class EndToEndGameFlowTest {
             assertTrue(gotNextTurn, "Turn should have advanced after pass");
         }
     }
+
+    @Test
+    @DisplayName("Player can leave room and immediately Quick Play again on the same connection with zero error")
+    void playerCanLeaveRoomAndImmediatelyQuickPlayAgainOnSameConnection() throws Exception {
+        try (RemotePlayerClient client = new RemotePlayerClient(port)) {
+            // 1. Initial join via Quick Play
+            client.send("JOIN Alice");
+            ServerEvent.Welcome welcome = client.waitForEvent(ServerEvent.Welcome.class, 3000);
+            assertNotNull(welcome, "Client must receive WELCOME on first join");
+            ServerEvent.RoomStatus status1 = client.waitForEvent(ServerEvent.RoomStatus.class, 3000);
+            assertNotNull(status1, "Client must receive ROOM_STATUS on first join");
+            String firstRoomId = status1.roomId();
+
+            // 2. Leave room
+            client.send("LEAVE_ROOM");
+            ServerEvent.RoomLeft left = client.waitForEvent(ServerEvent.RoomLeft.class, 3000);
+            assertNotNull(left, "Client must receive ROOM_LEFT acknowledgment");
+            assertEquals(firstRoomId, left.roomId());
+
+            // 3. Immediately Quick Play again on the same socket connection
+            client.send("JOIN Alice");
+            ServerEvent.RoomStatus status2 = client.waitForEvent(ServerEvent.RoomStatus.class, 3000);
+            assertNotNull(status2, "Client must receive ROOM_STATUS on re-join without error");
+
+            // Assert client did NOT receive "Already joined as Alice" error
+            boolean hadAlreadyJoinedError = client.receivedEvents.stream()
+                    .filter(ev -> ev instanceof ServerEvent.ErrorEvent)
+                    .map(ev -> ((ServerEvent.ErrorEvent) ev).errorMessage())
+                    .anyMatch(msg -> msg.contains("Already joined as"));
+            assertFalse(hadAlreadyJoinedError, "Server must not emit 'Already joined as' error on re-join");
+        }
+    }
+
+    @Test
+    @DisplayName("Player actively inside a room is rejected with error when issuing duplicate JOIN")
+    void playerActivelyInRoomIsRejectedWithDuplicateJoinError() throws Exception {
+        try (RemotePlayerClient client = new RemotePlayerClient(port)) {
+            client.send("JOIN Bob");
+            ServerEvent.RoomStatus status = client.waitForEvent(ServerEvent.RoomStatus.class, 3000);
+            assertNotNull(status, "Client must join room");
+
+            // Issue duplicate JOIN while still in room
+            client.send("JOIN Bob");
+            ServerEvent.ErrorEvent err = client.waitForEvent(ServerEvent.ErrorEvent.class, 3000);
+            assertNotNull(err, "Client must receive error when issuing JOIN while in an active room");
+            assertTrue(err.errorMessage().contains("Already in an active game room"));
+        }
+    }
 }

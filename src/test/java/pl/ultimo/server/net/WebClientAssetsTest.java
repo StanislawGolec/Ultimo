@@ -206,4 +206,21 @@ class WebClientAssetsTest {
         assertTrue(html.contains("case 'ROOM_LEFT':"), "JS must handle ROOM_LEFT server event");
         assertTrue(html.contains("Left room. Join another room or quick play!"), "UI must inform user when room is left");
     }
+
+    @Test
+    @DisplayName("Web client must contain contextual header controls with Player Badge and navigation mode state machine")
+    void webClientContainsContextualHeaderNavigationControls() {
+        String html = WebClientAssets.INDEX_HTML;
+
+        // Player Badge container
+        assertTrue(html.contains("id=\"playerBadge\""), "HTML must include playerBadge container");
+        assertTrue(html.contains("id=\"playerBadgeText\""), "HTML must include playerBadgeText span");
+        assertTrue(html.contains(".player-chip"), "CSS must style player badge chip");
+
+        // Contextual header switching functions
+        assertTrue(html.contains("setNavigationMode("), "JS must define setNavigationMode handler");
+        assertTrue(html.contains("updateRoomChipDisplay("), "JS must define updateRoomChipDisplay handler");
+        assertTrue(html.contains("activeAccessCode || currentRoomId"),
+                "copyActiveRoomCode must copy accessCode for private rooms or currentRoomId for public rooms");
+    }
 }

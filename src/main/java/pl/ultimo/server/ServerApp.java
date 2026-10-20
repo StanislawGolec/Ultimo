@@ -267,8 +267,8 @@ public class ServerApp implements ConnectionListener {
         if (command instanceof ClientCommand.Join join) {
             long startNanos = System.nanoTime();
             try {
-                if (session.getUsername() != null) {
-                    session.sendEvent(new ServerEvent.ErrorEvent("Already joined as " + session.getUsername()));
+                if (roomManager.getRoomForSession(session.getSessionId()).isPresent()) {
+                    session.sendEvent(new ServerEvent.ErrorEvent("Already in an active game room"));
                     return;
                 }
                 if (!ProtocolCodec.isValidUsername(join.username())) {

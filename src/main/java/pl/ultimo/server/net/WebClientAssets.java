@@ -48,7 +48,8 @@ public final class WebClientAssets {
     .brand { font-size: clamp(1.2rem, 2vw, 1.8rem); font-weight: 800; letter-spacing: 1px; color: #f59e0b; display: flex; align-items: center; gap: 8px; }
     .badge { font-size: 0.75rem; padding: 3px 8px; border-radius: 9999px; background: #3b82f6; color: white; text-transform: uppercase; font-weight: 700; }
     .lobby-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-    .room-chip { background: #1e293b; border: 1px solid #38bdf8; color: #38bdf8; padding: 4px 10px; border-radius: 9999px; font-size: 0.8rem; font-weight: 700; display: flex; align-items: center; gap: 6px; box-shadow: 0 0 10px rgba(56, 189, 248, 0.2); }
+    .room-chip { background: #1e293b; border: 1px solid #38bdf8; color: #38bdf8; padding: 4px 10px; border-radius: 9999px; font-size: 0.8rem; font-weight: 700; display: inline-flex; align-items: center; gap: 6px; box-shadow: 0 0 10px rgba(56, 189, 248, 0.2); }
+    .player-chip { background: #1e293b; border: 1px solid #475569; color: #f8fafc; padding: 4px 10px; border-radius: 9999px; font-size: 0.8rem; font-weight: 700; display: inline-flex; align-items: center; gap: 6px; }
     .btn-copy { background: #0284c7; color: white; border: none; padding: 2px 8px; border-radius: 4px; font-size: 0.72rem; font-weight: 700; cursor: pointer; transition: background 0.15s; }
     .btn-copy:hover { background: #0369a1; }
     input[type="text"] { background: #0f172a; border: 1px solid #475569; color: white; padding: 8px 12px; border-radius: 6px; outline: none; font-size: 0.95rem; }
@@ -172,13 +173,16 @@ public final class WebClientAssets {
       <button id="joinBtn">Quick Play</button>
       <button id="openCreateBtn" class="btn-create">Create Room</button>
       <button id="openBrowserBtn" class="btn-browse">Browse</button>
+      <div id="playerBadge" class="player-chip" style="display: none;">
+        <span id="playerBadgeText">👤 Player1</span>
+      </div>
+      <div id="roomChip" class="room-chip" style="display: none;">
+        <span id="roomChipText">Room: -</span>
+        <button id="copyCodeBtn" class="btn-copy" onclick="copyActiveRoomCode()" title="Copy Room Code">📋 Copy Code</button>
+      </div>
       <select id="botDifficultySelect" style="display: none; padding: 5px 8px; font-size: 0.8rem; background: #0f172a; color: #f8fafc; border: 1px solid #475569; border-radius: 6px; cursor: pointer;"><option value="NORMAL" selected>Bot: Normal</option><option value="EASY">Bot: Easy</option><option value="HARD">Bot: Hard</option></select>
       <button id="addBotBtn" class="btn-bot" style="display: none;" onclick="addAiBot()">🤖 Add AI Bot</button>
       <button id="startBtn" class="btn-start" style="display: none;">Start Match</button>
-      <div id="roomChip" class="room-chip" style="display: none;">
-        <span id="roomChipText">Room: -</span>
-        <button id="copyCodeBtn" class="btn-copy" style="display: none;" onclick="copyActiveRoomCode()" title="Copy Room Code">📋 Copy Code</button>
-      </div>
       <button id="leaveRoomBtn" class="btn-leave" style="display: none;" onclick="leaveRoom()">🚪 Leave Room</button>
       <span id="connStatus" style="font-size: 0.85rem; color: #94a3b8;">Disconnected</span>
     </div>
@@ -380,6 +384,8 @@ public final class WebClientAssets {
 
     const joinBtn = document.getElementById('joinBtn');
     const roomCodeInput = document.getElementById('roomCodeInput');
+    const playerBadge = document.getElementById('playerBadge');
+    const playerBadgeText = document.getElementById('playerBadgeText');
     const roomChip = document.getElementById('roomChip');
     const roomChipText = document.getElementById('roomChipText');
     const copyCodeBtn = document.getElementById('copyCodeBtn');
@@ -588,16 +594,76 @@ public final class WebClientAssets {
     }
 
     function copyActiveRoomCode() {
-      if (!activeAccessCode) return;
+      const codeToCopy = activeAccessCode || currentRoomId;
+      if (!codeToCopy) return;
       if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(activeAccessCode).then(() => {
-          copyCodeBtn.textContent = '✓ Copied!';
-          setTimeout(() => { copyCodeBtn.textContent = '📋 Copy Code'; }, 2000);
+        navigator.clipboard.writeText(codeToCopy).then(() => {
+          if (copyCodeBtn) copyCodeBtn.textContent = '✓ Copied!';
+          setTimeout(() => { if (copyCodeBtn) copyCodeBtn.textContent = '📋 Copy Code'; }, 2000);
         }).catch(() => {
-          prompt('Copy room code:', activeAccessCode);
+          prompt('Copy room code:', codeToCopy);
         });
       } else {
-        prompt('Copy room code:', activeAccessCode);
+        prompt('Copy room code:', codeToCopy);
+      }
+    }
+
+    function updateRoomChipDisplay(roomId, curCount, maxCount) {
+      if (!roomId || roomId === '-' || roomId === 'null') return;
+      currentRoomId = roomId;
+      if (roomInfo) {
+        roomInfo.style.display = 'inline';
+        roomInfo.textContent = `Room: ${roomId} (${curCount}/${maxCount})`;
+      }
+      if (roomChipText) {
+        if (activeAccessCode) {
+          roomChipText.innerHTML = `🔒 Private: <strong>${roomId}</strong> | Code: <span style="color: #fef08a;">${activeAccessCode}</span>`;
+        } else {
+          roomChipText.innerHTML = `🌐 Room: <strong>${roomId}</strong> (${curCount}/${maxCount})`;
+        }
+      }
+      if (copyCodeBtn) {
+        copyCodeBtn.style.display = 'inline-block';
+        copyCodeBtn.textContent = '📋 Copy Code';
+      }
+    }
+
+    function setNavigationMode(mode) {
+      const isLobby = (mode === 'lobby');
+      if (usernameInput) usernameInput.style.display = isLobby ? 'inline-block' : 'none';
+      if (roomCodeInput) roomCodeInput.style.display = isLobby ? 'inline-block' : 'none';
+      if (joinBtn) joinBtn.style.display = isLobby ? 'inline-block' : 'none';
+      if (openCreateBtn) openCreateBtn.style.display = isLobby ? 'inline-block' : 'none';
+      if (openBrowserBtn) openBrowserBtn.style.display = isLobby ? 'inline-block' : 'none';
+
+      if (isLobby) {
+        if (usernameInput) {
+          usernameInput.disabled = false;
+          usernameInput.style.borderColor = '#475569';
+        }
+        if (roomCodeInput) {
+          roomCodeInput.disabled = false;
+          roomCodeInput.value = '';
+        }
+        if (joinBtn) {
+          joinBtn.disabled = false;
+          joinBtn.textContent = 'Quick Play';
+        }
+        if (openCreateBtn) openCreateBtn.disabled = false;
+        if (openBrowserBtn) openBrowserBtn.disabled = false;
+        if (playerBadge) playerBadge.style.display = 'none';
+        if (roomChip) roomChip.style.display = 'none';
+        if (leaveRoomBtn) leaveRoomBtn.style.display = 'none';
+        if (startBtn) startBtn.style.display = 'none';
+        if (addBotBtn) addBotBtn.style.display = 'none';
+        if (botDifficultySelect) botDifficultySelect.style.display = 'none';
+      } else {
+        if (playerBadge) {
+          playerBadge.style.display = 'inline-flex';
+          if (playerBadgeText) playerBadgeText.textContent = '👤 ' + (myUsername || (usernameInput ? usernameInput.value.trim() : '') || 'Player');
+        }
+        if (roomChip) roomChip.style.display = 'inline-flex';
+        if (leaveRoomBtn) leaveRoomBtn.style.display = 'inline-block';
       }
     }
 
@@ -874,18 +940,8 @@ public final class WebClientAssets {
 
           if (roomId && roomId !== '-' && roomId !== 'null') {
             currentRoomId = roomId;
-            if (leaveRoomBtn) leaveRoomBtn.style.display = 'inline-block';
-            roomInfo.style.display = 'inline';
-            let label = `Room: ${roomId} (${curCount}/${maxCount})`;
-            if (activeAccessCode) {
-              label = `Room: ${roomId} [CODE: ${activeAccessCode}]`;
-              copyCodeBtn.style.display = 'inline-block';
-            } else {
-              copyCodeBtn.style.display = 'none';
-            }
-            roomInfo.textContent = label;
-            roomChipText.textContent = label;
-            roomChip.style.display = 'flex';
+            setNavigationMode('in-room');
+            updateRoomChipDisplay(roomId, curCount, maxCount);
           }
           logMessage(`Room ${roomId}: ${playerNames.join(', ')} joined`, 'info');
 
@@ -933,9 +989,7 @@ public final class WebClientAssets {
           playerGraceSeconds.clear();
           drawBtn.disabled = true;
           passBtn.disabled = true;
-          joinBtn.disabled = false;
-          usernameInput.disabled = false;
-          if (roomCodeInput) roomCodeInput.disabled = false;
+          setNavigationMode('lobby');
           break;
         }
 
@@ -1097,10 +1151,7 @@ public final class WebClientAssets {
             if (msg.includes('Room Access Code:')) {
               activeAccessCode = msg.substring(msg.indexOf('Room Access Code:') + 17).trim();
               if (currentRoomId && currentRoomId !== '-') {
-                const label = `Room: ${currentRoomId} [CODE: ${activeAccessCode}]`;
-                roomInfo.textContent = label;
-                roomChipText.textContent = label;
-                copyCodeBtn.style.display = 'inline-block';
+                updateRoomChipDisplay(currentRoomId, lastCurCount, lastMaxCount);
               }
             }
             if (msg.includes('no playable moves') || msg.includes('auto-passed') || msg.includes('Turn passed')) {
@@ -1188,16 +1239,13 @@ public final class WebClientAssets {
             roomChip.style.display = 'none';
             turnBanner.className = 'turn-banner';
             turnBanner.textContent = 'Kicked from room. Join another room or quick play!';
-            joinBtn.disabled = false;
-            usernameInput.disabled = false;
-            if (roomCodeInput) roomCodeInput.disabled = false;
-          } else if (errMsg.includes('NAME_TAKEN') || errMsg.includes('INVALID_USERNAME') || !gameStarted) {
-            joinBtn.disabled = false;
-            usernameInput.disabled = false;
-            if (roomCodeInput) roomCodeInput.disabled = false;
-            usernameInput.style.borderColor = '#ef4444';
-            usernameInput.focus();
-            myUsername = '';
+            setNavigationMode('lobby');
+          } else if (errMsg.includes('NAME_TAKEN') || errMsg.includes('INVALID_USERNAME') || (!gameStarted && !currentRoomId)) {
+            setNavigationMode('lobby');
+            if (usernameInput) {
+              usernameInput.style.borderColor = '#ef4444';
+              usernameInput.focus();
+            }
           }
           break;
         }
@@ -1211,6 +1259,7 @@ public final class WebClientAssets {
           turnBanner.style.borderColor = '#ef4444';
           turnBanner.style.color = '#ef4444';
           turnBanner.textContent = `⚠️ Server shutting down in ${drainSec}s...`;
+          setNavigationMode('lobby');
           drawBtn.disabled = true;
           passBtn.disabled = true;
           startBtn.style.display = 'none';
@@ -1600,7 +1649,16 @@ public final class WebClientAssets {
     }
 
     // Auto-connect on page load
-    window.addEventListener('DOMContentLoaded', connect);
+    window.addEventListener('DOMContentLoaded', () => {
+      if (roomCodeInput) {
+        roomCodeInput.addEventListener('input', () => {
+          const val = roomCodeInput.value.trim();
+          if (joinBtn) joinBtn.textContent = val ? 'Join Room' : 'Quick Play';
+        });
+      }
+      setNavigationMode('lobby');
+      connect();
+    });
   </script>
 </body>
 </html>
