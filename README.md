@@ -532,3 +532,9 @@ All 311 tests execute cleanly with zero carrier pinning warnings.
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+---
+
+## Development
+
+Developed with the assistance of agentic AI workflows and LLMs.
